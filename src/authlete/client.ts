@@ -11,7 +11,9 @@ import {
   TokenRequest,
   TokenResponse,
   IntrospectionRequest,
-  IntrospectionResponse
+  IntrospectionResponse,
+  UserInfoRequest,
+  UserInfoResponse
 } from './types';
 
 export class AuthleteApiError extends Error {
@@ -31,6 +33,7 @@ export interface AuthleteClient {
   authorizationFail(request: AuthorizationFailRequest): Promise<AuthorizationFailResponse>;
   token(request: TokenRequest): Promise<TokenResponse>;
   introspection(request: IntrospectionRequest): Promise<IntrospectionResponse>;
+  userInfo(request: UserInfoRequest): Promise<UserInfoResponse>;
 }
 
 export class AuthleteClientImpl implements AuthleteClient {
@@ -119,7 +122,7 @@ export class AuthleteClientImpl implements AuthleteClient {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.config.serviceAccessToken}`,
-        'User-Agent': 'OAuth2-Authorization-Server/1.0.0'
+        'User-Agent': 'OpenID-Connect-Authorization-Server/1.0.0'
       },
       // Connection pooling configuration
       maxRedirects: 0,
@@ -278,5 +281,20 @@ export class AuthleteClientImpl implements AuthleteClient {
     );
     
     return this.makeRequest<IntrospectionResponse>('POST', this.getApiPath('/auth/introspection'), request);
+  }
+
+  async userInfo(request: UserInfoRequest): Promise<UserInfoResponse> {
+    // Log the userinfo request details
+    logger.logDebug(
+      'Calling Authlete userinfo API',
+      'AuthleteClient',
+      {
+        hasToken: !!request.token,
+        tokenLength: request.token?.length,
+        endpoint: this.getApiPath('/auth/userinfo')
+      }
+    );
+    
+    return this.makeRequest<UserInfoResponse>('POST', this.getApiPath('/auth/userinfo'), request);
   }
 }

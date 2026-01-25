@@ -182,7 +182,7 @@ describe('AuthorizationController', () => {
 });
 
 // Property-Based Tests
-describe('OAuth 2.0 Authorization Server Properties', () => {
+describe('OpenID Connect Authorization Server Properties', () => {
   let controller: AuthorizationControllerImpl;
   let mockRequest: Partial<Request>;
   let mockResponse: Partial<Response>;

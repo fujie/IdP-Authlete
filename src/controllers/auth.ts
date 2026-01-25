@@ -393,7 +393,7 @@ export class AuthControllerImpl implements AuthController {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Login - OAuth 2.0 Authorization Server</title>
+    <title>Login - OpenID Connect Authorization Server</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
@@ -444,7 +444,7 @@ export class AuthControllerImpl implements AuthController {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Consent - OAuth 2.0 Authorization Server</title>
+    <title>Consent - OpenID Connect Authorization Server</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
