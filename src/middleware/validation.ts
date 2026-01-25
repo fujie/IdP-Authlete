@@ -124,12 +124,42 @@ function validateOAuthParameter(name: string, value: string): ValidationError[] 
       break;
       
     case 'client_id':
-      if (!/^[a-zA-Z0-9_-]+$/.test(value) || value.length > 255) {
-        errors.push({
-          field: name,
-          message: 'Invalid client_id format',
-          value
-        });
+      // For OpenID Federation, client_id can be an entity identifier (URL)
+      // Check if it's a URL format (starts with http:// or https://)
+      if (value.startsWith('http://') || value.startsWith('https://')) {
+        try {
+          const url = new URL(value);
+          if (!['http:', 'https:'].includes(url.protocol)) {
+            errors.push({
+              field: name,
+              message: 'Entity identifier client_id must use http or https protocol',
+              value
+            });
+          }
+          // Additional validation for entity identifiers per OpenID Federation 1.0
+          if (url.search || url.hash) {
+            errors.push({
+              field: name,
+              message: 'Entity identifier client_id must not contain query parameters or fragments',
+              value
+            });
+          }
+        } catch {
+          errors.push({
+            field: name,
+            message: 'Invalid entity identifier client_id format',
+            value
+          });
+        }
+      } else {
+        // Traditional client_id format (alphanumeric)
+        if (!/^[a-zA-Z0-9_-]+$/.test(value) || value.length > 255) {
+          errors.push({
+            field: name,
+            message: 'Invalid client_id format',
+            value
+          });
+        }
       }
       break;
       

@@ -13,7 +13,19 @@ import {
   IntrospectionRequest,
   IntrospectionResponse,
   UserInfoRequest,
-  UserInfoResponse
+  UserInfoResponse,
+  FederationFetchRequest,
+  FederationFetchResponse,
+  FederationListRequest,
+  FederationListResponse,
+  FederationResolveRequest,
+  FederationResolveResponse,
+  AuthleteFederationRegistrationRequest,
+  AuthleteFederationRegistrationResponse,
+  AuthleteClientCreateRequest,
+  AuthleteClientCreateResponse,
+  AuthleteDynamicRegistrationRequest,
+  AuthleteDynamicRegistrationResponse
 } from './types';
 
 export class AuthleteApiError extends Error {
@@ -34,6 +46,16 @@ export interface AuthleteClient {
   token(request: TokenRequest): Promise<TokenResponse>;
   introspection(request: IntrospectionRequest): Promise<IntrospectionResponse>;
   userInfo(request: UserInfoRequest): Promise<UserInfoResponse>;
+  // OpenID Federation 1.0 methods
+  federationFetch(request: FederationFetchRequest): Promise<FederationFetchResponse>;
+  federationList(request: FederationListRequest): Promise<FederationListResponse>;
+  federationResolve(request: FederationResolveRequest): Promise<FederationResolveResponse>;
+  // Federation Registration
+  federationRegistration(request: AuthleteFederationRegistrationRequest): Promise<AuthleteFederationRegistrationResponse>;
+  // Client Management
+  createClient(request: AuthleteClientCreateRequest): Promise<AuthleteClientCreateResponse>;
+  // Dynamic Client Registration
+  dynamicClientRegistration(request: AuthleteDynamicRegistrationRequest): Promise<AuthleteDynamicRegistrationResponse>;
 }
 
 export class AuthleteClientImpl implements AuthleteClient {
@@ -296,5 +318,121 @@ export class AuthleteClientImpl implements AuthleteClient {
     );
     
     return this.makeRequest<UserInfoResponse>('POST', this.getApiPath('/auth/userinfo'), request);
+  }
+
+  // OpenID Federation 1.0 API methods
+  async federationFetch(request: FederationFetchRequest): Promise<FederationFetchResponse> {
+    logger.logDebug(
+      'Calling Authlete federation fetch API',
+      'AuthleteClient',
+      {
+        iss: request.iss,
+        sub: request.sub,
+        endpoint: this.getApiPath('/federation/fetch')
+      }
+    );
+    
+    return this.makeRequest<FederationFetchResponse>('POST', this.getApiPath('/federation/fetch'), request);
+  }
+
+  async federationList(request: FederationListRequest): Promise<FederationListResponse> {
+    logger.logDebug(
+      'Calling Authlete federation list API',
+      'AuthleteClient',
+      {
+        iss: request.iss,
+        entity_type: request.entity_type,
+        endpoint: this.getApiPath('/federation/list')
+      }
+    );
+    
+    return this.makeRequest<FederationListResponse>('POST', this.getApiPath('/federation/list'), request);
+  }
+
+  async federationResolve(request: FederationResolveRequest): Promise<FederationResolveResponse> {
+    logger.logDebug(
+      'Calling Authlete federation resolve API',
+      'AuthleteClient',
+      {
+        sub: request.sub,
+        anchor: request.anchor,
+        type: request.type,
+        endpoint: this.getApiPath('/federation/resolve')
+      }
+    );
+    
+    return this.makeRequest<FederationResolveResponse>('POST', this.getApiPath('/federation/resolve'), request);
+  }
+
+  async federationRegistration(request: AuthleteFederationRegistrationRequest): Promise<AuthleteFederationRegistrationResponse> {
+    logger.logInfo(
+      'Calling Authlete federation registration API',
+      'AuthleteClient',
+      {
+        clientName: request.client_name,
+        redirectUris: request.redirect_uris?.length || 0,
+        endpoint: this.getApiPath('/federation/registration'),
+        requestPayload: JSON.stringify(request, null, 2)
+      }
+    );
+    
+    try {
+      const response = await this.makeRequest<AuthleteFederationRegistrationResponse>('POST', this.getApiPath('/federation/registration'), request);
+      
+      logger.logInfo(
+        'Authlete federation registration API response received',
+        'AuthleteClient',
+        {
+          action: response.action,
+          clientId: response.client_id,
+          responsePayload: JSON.stringify(response, null, 2)
+        }
+      );
+      
+      return response;
+    } catch (error) {
+      logger.logError({
+        message: 'Authlete federation registration API error',
+        component: 'AuthleteClient',
+        error: {
+          name: error instanceof Error ? error.name : 'UnknownError',
+          message: error instanceof Error ? error.message : String(error),
+          ...(error instanceof Error && error.stack && { stack: error.stack })
+        },
+        context: {
+          clientName: request.client_name,
+          endpoint: this.getApiPath('/federation/registration')
+        }
+      });
+      throw error;
+    }
+  }
+
+  async createClient(request: AuthleteClientCreateRequest): Promise<AuthleteClientCreateResponse> {
+    logger.logDebug(
+      'Calling Authlete client create API',
+      'AuthleteClient',
+      {
+        clientName: request.client_name,
+        redirectUris: request.redirect_uris?.length || 0,
+        endpoint: this.getApiPath('/client/create')
+      }
+    );
+    
+    return this.makeRequest<AuthleteClientCreateResponse>('POST', this.getApiPath('/client/create'), request);
+  }
+
+  async dynamicClientRegistration(request: AuthleteDynamicRegistrationRequest): Promise<AuthleteDynamicRegistrationResponse> {
+    logger.logDebug(
+      'Calling Authlete dynamic client registration API',
+      'AuthleteClient',
+      {
+        clientName: request.client_name,
+        redirectUris: request.redirect_uris?.length || 0,
+        endpoint: this.getApiPath('/client/registration')
+      }
+    );
+    
+    return this.makeRequest<AuthleteDynamicRegistrationResponse>('POST', this.getApiPath('/client/registration'), request);
   }
 }

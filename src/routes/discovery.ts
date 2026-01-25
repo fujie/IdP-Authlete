@@ -13,6 +13,11 @@ router.get('/.well-known/openid-configuration', (req, res) => {
     userinfo_endpoint: `${baseUrl}/userinfo`,
     introspection_endpoint: `${baseUrl}/introspect`,
     jwks_uri: `${baseUrl}/.well-known/jwks.json`,
+    // OpenID Federation 1.0 endpoints
+    federation_entity_endpoint: `${baseUrl}/.well-known/openid-federation`,
+    federation_fetch_endpoint: `${baseUrl}/federation/fetch`,
+    federation_list_endpoint: `${baseUrl}/federation/list`,
+    federation_resolve_endpoint: `${baseUrl}/federation/resolve`,
     scopes_supported: [
       'openid',
       'profile',
@@ -72,7 +77,10 @@ router.get('/.well-known/openid-configuration', (req, res) => {
     code_challenge_methods_supported: [
       'plain',
       'S256'
-    ]
+    ],
+    // OpenID Federation 1.0 specific claims
+    federation_registration_endpoint: `${baseUrl}/federation/register`,
+    organization_name: 'OpenID Connect Authorization Server with Federation Support'
   };
 
   res.json(discoveryDocument);

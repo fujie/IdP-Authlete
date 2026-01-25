@@ -29,6 +29,8 @@ export interface AuthorizationLogEntry extends BaseLogEntry {
   outcome: 'success' | 'error' | 'denied';
   errorCode?: string;
   errorDescription?: string;
+  requestObjectUsed?: boolean;
+  clientRegistered?: boolean;
 }
 
 export interface TokenLogEntry extends BaseLogEntry {

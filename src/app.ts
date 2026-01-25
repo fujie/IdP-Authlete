@@ -7,10 +7,12 @@ import { AuthorizationControllerImpl } from './controllers/authorization';
 import { AuthControllerImpl } from './controllers/auth';
 import { TokenControllerImpl } from './controllers/token';
 import { IntrospectionControllerImpl } from './controllers/introspection';
+import { FederationControllerImpl } from './controllers/federation';
 import { createAuthorizationRoutes } from './routes/authorization';
 import { createAuthRoutes } from './routes/auth';
 import { createTokenRoutes } from './routes/token';
 import { createIntrospectionRoutes } from './routes/introspection';
+import { createFederationRoutes } from './routes/federation';
 import userInfoRoutes from './routes/userinfo';
 import discoveryRoutes from './routes/discovery';
 import { validateInput } from './middleware/validation';
@@ -67,6 +69,7 @@ export function createApp(): express.Application {
   const authController = new AuthControllerImpl(authleteClient);
   const tokenController = new TokenControllerImpl(authleteClient);
   const introspectionController = new IntrospectionControllerImpl(authleteClient);
+  const federationController = new FederationControllerImpl(authleteClient);
 
   // Initialize health check service
   const healthCheckService = new HealthCheckService(authleteClient);
@@ -76,6 +79,7 @@ export function createApp(): express.Application {
   app.use('/', createAuthRoutes(authController));
   app.use('/', createTokenRoutes(tokenController));
   app.use('/', createIntrospectionRoutes(introspectionController));
+  app.use('/', createFederationRoutes(federationController));
   app.use('/', userInfoRoutes);
   app.use('/', discoveryRoutes);
 
