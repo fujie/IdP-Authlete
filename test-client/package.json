@@ -1,7 +1,7 @@
 {
-  "name": "oauth2-test-client",
+  "name": "openid-connect-test-client",
   "version": "1.0.0",
-  "description": "Test Relying Party for OAuth 2.0 Authorization Server",
+  "description": "Test Relying Party for OpenID Connect Authorization Server",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
