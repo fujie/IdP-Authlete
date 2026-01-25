@@ -1,6 +1,6 @@
-# OAuth 2.0 Authorization Server
+# OpenID Connect Authorization Server
 
-An OAuth 2.0 Authorization Server built with Node.js/TypeScript and Express.js, integrated with Authlete's cloud-based authorization service.
+An OpenID Connect Authorization Server built with Node.js/TypeScript and Express.js, integrated with Authlete's cloud-based authorization service.
 
 ## Features
 

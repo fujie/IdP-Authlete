@@ -8,13 +8,13 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3002;
 
-// OAuth 2.0 Configuration from environment variables
+// OpenID Connect Configuration from environment variables
 const OAUTH_CONFIG = {
   clientId: process.env.CLIENT_ID || '2556995098',
   clientSecret: process.env.CLIENT_SECRET || 'test-client-secret',
   authorizationServer: process.env.AUTHORIZATION_SERVER || 'http://localhost:3001',
   redirectUri: process.env.REDIRECT_URI || 'http://localhost:3002/callback',
-  scope: process.env.SCOPE || 'read write'
+  scope: process.env.SCOPE || 'openid profile email read write'
 };
 
 // In-memory store for OAuth states (temporary solution)
@@ -31,7 +31,7 @@ setInterval(() => {
     }
   }
   
-  console.log('Cleaned up old OAuth states. Current count:', oauthStates.size);
+  console.log('Cleaned up old OpenID Connect states. Current count:', oauthStates.size);
 }, 10 * 60 * 1000);
 
 // Session configuration
@@ -61,11 +61,12 @@ app.get('/', (req, res) => {
   res.render('index', {
     user: req.session.user,
     accessToken: req.session.accessToken,
+    idToken: req.session.idToken,
     config: OAUTH_CONFIG
   });
 });
 
-// Start OAuth 2.0 Authorization Code Flow
+// Start OpenID Connect Authorization Code Flow
 app.get('/login', (req, res) => {
   // Clear any existing OAuth state
   delete req.session.oauthState;
@@ -83,7 +84,7 @@ app.get('/login', (req, res) => {
     sessionId: req.sessionID
   });
 
-  console.log('Starting OAuth flow with state:', state);
+  console.log('Starting OpenID Connect flow with state:', state);
   console.log('Session ID:', req.sessionID);
   console.log('States in memory:', oauthStates.size);
 
@@ -107,7 +108,7 @@ app.get('/login', (req, res) => {
   });
 });
 
-// OAuth 2.0 Callback endpoint
+// OpenID Connect Callback endpoint
 app.get('/callback', async (req, res) => {
   const { code, state, error, error_description } = req.query;
 
@@ -201,6 +202,7 @@ app.get('/callback', async (req, res) => {
     // Store tokens in session
     req.session.accessToken = tokenData.access_token;
     req.session.refreshToken = tokenData.refresh_token;
+    req.session.idToken = tokenData.id_token; // OpenID Connect ID Token
     req.session.tokenType = tokenData.token_type || 'Bearer';
     req.session.expiresIn = tokenData.expires_in;
 
@@ -265,9 +267,31 @@ app.get('/api-test', async (req, res) => {
     const introspectionData = introspectionResponse.data;
     console.log('Introspection response:', introspectionData);
 
+    // Test UserInfo endpoint if we have openid scope
+    let userInfoData = null;
+    if (req.session.idToken) {
+      try {
+        console.log('Testing UserInfo endpoint...');
+        const userInfoResponse = await axios.get(
+          `${OAUTH_CONFIG.authorizationServer}/userinfo`,
+          {
+            headers: {
+              'Authorization': `Bearer ${req.session.accessToken}`
+            }
+          }
+        );
+        userInfoData = userInfoResponse.data;
+        console.log('UserInfo response:', userInfoData);
+      } catch (userInfoError) {
+        console.error('UserInfo test error:', userInfoError.response?.data || userInfoError.message);
+      }
+    }
+
     res.render('api-test', {
       introspectionData: introspectionData,
-      accessToken: req.session.accessToken
+      userInfoData: userInfoData,
+      accessToken: req.session.accessToken,
+      idToken: req.session.idToken
     });
 
   } catch (error) {
@@ -294,7 +318,7 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    service: 'oauth2-test-client'
+    service: 'openid-connect-test-client'
   });
 });
 
@@ -309,7 +333,7 @@ app.use((err, req, res, next) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`OAuth 2.0 Test Client running on http://localhost:${PORT}`);
+  console.log(`OpenID Connect Test Client running on http://localhost:${PORT}`);
   console.log('Configuration:');
   console.log(`- Client ID: ${OAUTH_CONFIG.clientId}`);
   console.log(`- Client Secret: ${OAUTH_CONFIG.clientSecret ? '[SET]' : '[NOT SET]'}`);

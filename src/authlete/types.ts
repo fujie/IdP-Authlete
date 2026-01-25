@@ -47,6 +47,7 @@ export interface TokenResponse {
   accessToken?: string;
   refreshToken?: string;
   accessTokenDuration?: number;
+  idToken?: string;  // OpenID Connect ID Token
 }
 
 export interface IntrospectionRequest {
@@ -79,4 +80,16 @@ export interface ServiceInfo {
 export interface ScopeInfo {
   name: string;
   description?: string;
+}
+
+// OpenID Connect UserInfo endpoint types
+export interface UserInfoRequest {
+  token: string;
+}
+
+export interface UserInfoResponse {
+  action: 'OK' | 'BAD_REQUEST' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'INTERNAL_SERVER_ERROR';
+  responseContent?: string;
+  subject?: string;
+  claims?: Record<string, any>;
 }

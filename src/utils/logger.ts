@@ -1,5 +1,5 @@
 /**
- * Structured logging utility for OAuth 2.0 Authorization Server
+ * Structured logging utility for OpenID Connect Authorization Server
  * Provides comprehensive logging for all operations as required by Requirements 8.1-8.4
  */
 

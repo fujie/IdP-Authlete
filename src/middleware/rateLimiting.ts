@@ -177,7 +177,7 @@ export function createRateLimit(
         return;
       }
       
-      // Return OAuth 2.0 compliant error response
+      // Return OpenID Connect compliant error response
       res.status(429).json({
         error: 'temporarily_unavailable',
         error_description: 'The authorization server is temporarily overloaded or under maintenance',

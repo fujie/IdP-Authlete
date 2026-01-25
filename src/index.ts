@@ -7,7 +7,7 @@ import { validateStartupConfiguration } from './startup/validation';
 async function startServer(): Promise<void> {
   try {
     // Log startup information
-    logger.logInfo('Starting OAuth 2.0 Authorization Server', 'Application', {
+    logger.logInfo('Starting OpenID Connect Authorization Server', 'Application', {
       environment: config.server.nodeEnv,
       authleteBaseUrl: config.authlete.baseUrl,
       port: config.server.port,

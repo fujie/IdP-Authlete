@@ -1,7 +1,7 @@
 {
-  "name": "oauth2-authorization-server",
+  "name": "openid-connect-authorization-server",
   "version": "1.0.0",
-  "description": "OAuth 2.0 Authorization Server with Authlete integration",
+  "description": "OpenID Connect Authorization Server with Authlete integration",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",

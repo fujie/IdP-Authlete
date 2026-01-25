@@ -15,8 +15,8 @@ export interface ErrorHandlerOptions {
 }
 
 /**
- * Global error handling middleware for OAuth 2.0 authorization server
- * Handles all unhandled errors and provides OAuth 2.0 compliant error responses
+ * Global error handling middleware for OpenID Connect authorization server
+ * Handles all unhandled errors and provides OpenID Connect compliant error responses
  */
 export function createErrorHandler(options: ErrorHandlerOptions = {}): (error: any, req: Request, res: Response, next: NextFunction) => void {
   const { includeStackTrace = false, logErrors = true } = options;
@@ -72,7 +72,7 @@ export function createErrorHandler(options: ErrorHandlerOptions = {}): (error: a
 }
 
 /**
- * Creates OAuth 2.0 compliant error response based on error type and endpoint
+ * Creates OpenID Connect compliant error response based on error type and endpoint
  */
 function createErrorResponse(error: any, req: Request): OAuth2Error {
   const endpoint = getEndpointType(req.path);

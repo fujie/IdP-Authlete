@@ -234,7 +234,7 @@ describe('AuthController', () => {
 });
 
 // Property-Based Tests
-describe('OAuth 2.0 Authorization Server Properties', () => {
+describe('OpenID Connect Authorization Server Properties', () => {
   let controller: AuthControllerImpl;
   let mockAuthleteClient: AuthleteClient;
 

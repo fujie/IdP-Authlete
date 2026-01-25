@@ -11,6 +11,8 @@ import { createAuthorizationRoutes } from './routes/authorization';
 import { createAuthRoutes } from './routes/auth';
 import { createTokenRoutes } from './routes/token';
 import { createIntrospectionRoutes } from './routes/introspection';
+import userInfoRoutes from './routes/userinfo';
+import discoveryRoutes from './routes/discovery';
 import { validateInput } from './middleware/validation';
 import { generalRateLimit } from './middleware/rateLimiting';
 import { createErrorHandler, notFoundHandler } from './middleware/errorHandler';
@@ -74,6 +76,8 @@ export function createApp(): express.Application {
   app.use('/', createAuthRoutes(authController));
   app.use('/', createTokenRoutes(tokenController));
   app.use('/', createIntrospectionRoutes(introspectionController));
+  app.use('/', userInfoRoutes);
+  app.use('/', discoveryRoutes);
 
   // Health check endpoints
   app.get('/health', async (_req, res) => {

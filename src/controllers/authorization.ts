@@ -83,7 +83,7 @@ export class AuthorizationControllerImpl implements AuthorizationController {
         errorDescription: error instanceof Error ? error.message : 'Internal server error'
       });
       
-      // Return OAuth 2.0 compliant error response
+      // Return OpenID Connect compliant error response
       const errorResponse = this.createErrorResponse(error);
       res.status(400).json(errorResponse);
     }
@@ -202,7 +202,7 @@ export class AuthorizationControllerImpl implements AuthorizationController {
   }
 
   private createErrorResponse(error: any): any {
-    // Create OAuth 2.0 compliant error response
+    // Create OpenID Connect compliant error response
     if (error.name === 'AuthleteApiError') {
       return {
         error: 'server_error',
