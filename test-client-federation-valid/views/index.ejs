@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenID Federation Test Client (Valid)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+            color: white;
+            border-radius: 8px;
+        }
+        .status {
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            border-left: 4px solid #4CAF50;
+            background-color: #f0f8f0;
+        }
+        .config {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .config h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .config-item {
+            margin: 8px 0;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 24px;
+            margin: 10px 5px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .button:hover {
+            background-color: #45a049;
+        }
+        .button.secondary {
+            background-color: #2196F3;
+        }
+        .button.secondary:hover {
+            background-color: #1976D2;
+        }
+        .user-info {
+            background: #e8f5e9;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .token-info {
+            background: #fff3e0;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .valid-badge {
+            display: inline-block;
+            background: #4CAF50;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>OpenID Federation Test Client</h1>
+            <span class="valid-badge">VALID CLIENT</span>
+            <p>This client has an entity ID registered in the trust anchor</p>
+        </div>
+
+        <div class="status">
+            <h3>Client Status</h3>
+            <p><strong>Entity ID:</strong> <%= config.entityId %></p>
+            <p><strong>Registration Status:</strong> 
+                <% if (registeredClientId) { %>
+                    ✅ Registered (Client ID: <%= registeredClientId %>)
+                <% } else { %>
+                    ❌ Not registered yet
+                <% } %>
+            </p>
+            <p><strong>Trust Anchor:</strong> <%= config.trustAnchorId %></p>
+        </div>
+
+        <% if (user && user.authenticated) { %>
+            <div class="user-info">
+                <h3>✅ Authentication Successful</h3>
+                <p><strong>User:</strong> <%= user.name %></p>
+                <p><strong>User ID:</strong> <%= user.id %></p>
+                <p><strong>Status:</strong> Authenticated via OpenID Federation Dynamic Registration</p>
+            </div>
+
+            <% if (accessToken) { %>
+                <div class="token-info">
+                    <h4>Access Token (first 50 chars):</h4>
+                    <p><%= accessToken.substring(0, 50) %>...</p>
+                </div>
+            <% } %>
+
+            <% if (idToken) { %>
+                <div class="token-info">
+                    <h4>ID Token (first 50 chars):</h4>
+                    <p><%= idToken.substring(0, 50) %>...</p>
+                </div>
+            <% } %>
+
+            <a href="/logout" class="button">Logout</a>
+        <% } else { %>
+            <div class="config">
+                <h3>Federation Configuration</h3>
+                <div class="config-item"><strong>Entity ID:</strong> <%= config.entityId %></div>
+                <div class="config-item"><strong>Authorization Server:</strong> <%= config.authorizationServer %></div>
+                <div class="config-item"><strong>Redirect URI:</strong> <%= config.redirectUri %></div>
+                <div class="config-item"><strong>Scope:</strong> <%= config.scope %></div>
+                <div class="config-item"><strong>Trust Anchor:</strong> <%= config.trustAnchorId %></div>
+                <div class="config-item"><strong>Registration Endpoint:</strong> <%= config.federationRegistrationEndpoint %></div>
+            </div>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="/federation-login" class="button">
+                    🔐 Login with OpenID Federation
+                </a>
+                <br><br>
+                <a href="/test-registration" class="button secondary">
+                    🧪 Test Dynamic Registration
+                </a>
+            </div>
+
+            <div style="margin-top: 30px; padding: 15px; background: #f0f8f0; border-radius: 5px;">
+                <h4>How it works:</h4>
+                <ol>
+                    <li>Click "Login with OpenID Federation" to start the flow</li>
+                    <li>The client will perform dynamic registration with the authorization server</li>
+                    <li>Since this client's entity ID is registered in the trust anchor, registration should succeed</li>
+                    <li>You'll be redirected to the authorization server for authentication</li>
+                    <li>After successful authentication, you'll be redirected back here with tokens</li>
+                </ol>
+            </div>
+        <% } %>
+
+        <div style="margin-top: 30px; text-align: center;">
+            <a href="/.well-known/openid-federation" class="button secondary" target="_blank">
+                📋 View Entity Configuration
+            </a>
+            <a href="/health" class="button secondary" target="_blank">
+                ❤️ Health Check
+            </a>
+        </div>
+    </div>
+</body>
+</html>

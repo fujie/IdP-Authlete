@@ -199,15 +199,14 @@ export interface AuthleteFederationRegistrationRequest {
   id_token_signed_response_alg?: string;
   token_endpoint_auth_method?: string;
   // Federation-specific parameters
-  software_statement?: string; // JWT containing entity statement
-  // Additional Federation metadata
-  entity_statement?: string; // Entity's own statement
-  trust_chain?: string[]; // Array of JWTs forming the trust chain
-  trust_anchor_id?: string; // Trust anchor identifier
+  entityConfiguration?: string;  // JWT entity configuration
+  trustChain?: string[];         // Array of entity statements (JWTs)
+  trustAnchorId?: string;        // Trust anchor identifier
+  software_statement?: string;   // JWT containing entity statement (legacy)
 }
 
 export interface AuthleteFederationRegistrationResponse {
-  action: 'CREATED' | 'BAD_REQUEST' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'INTERNAL_SERVER_ERROR';
+  action: 'OK' | 'CREATED' | 'BAD_REQUEST' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'INTERNAL_SERVER_ERROR';
   client_id?: string;
   client_secret?: string;
   client_id_issued_at?: number;
@@ -231,8 +230,11 @@ export interface AuthleteFederationRegistrationResponse {
   token_endpoint_auth_method?: string;
   responseContent?: string;
   // Federation-specific response fields
-  trust_chain?: string[];
-  trust_chain_expires_at?: number;
+  entityStatement?: string;      // JWT entity statement for the client
+  entityConfiguration?: string | undefined;  // JWT entity configuration from request
+  trustChain?: string[];         // Validated trust chain
+  trustChainExpiresAt?: number;  // Trust chain expiration
+  trustAnchorId?: string | undefined;        // Trust anchor used for validation
   // Standard Authlete response fields
   resultCode?: string;
   resultMessage?: string;
@@ -287,4 +289,17 @@ export interface AuthleteDynamicRegistrationResponse {
   id_token_signed_response_alg?: string;
   token_endpoint_auth_method?: string;
   responseContent?: string;
+}
+
+// Authlete Federation Configuration API types
+export interface AuthleteFederationConfigurationRequest {
+  // No parameters needed - returns server's entity configuration
+}
+
+export interface AuthleteFederationConfigurationResponse {
+  action: 'OK' | 'BAD_REQUEST' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'INTERNAL_SERVER_ERROR';
+  entityConfiguration?: string; // JWT entity configuration
+  responseContent?: string;
+  resultCode?: string;
+  resultMessage?: string;
 }

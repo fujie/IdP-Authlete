@@ -22,6 +22,8 @@ import {
   FederationResolveResponse,
   AuthleteFederationRegistrationRequest,
   AuthleteFederationRegistrationResponse,
+  AuthleteFederationConfigurationRequest,
+  AuthleteFederationConfigurationResponse,
   AuthleteClientCreateRequest,
   AuthleteClientCreateResponse,
   AuthleteDynamicRegistrationRequest,
@@ -52,6 +54,8 @@ export interface AuthleteClient {
   federationResolve(request: FederationResolveRequest): Promise<FederationResolveResponse>;
   // Federation Registration
   federationRegistration(request: AuthleteFederationRegistrationRequest): Promise<AuthleteFederationRegistrationResponse>;
+  // Federation Configuration
+  federationConfiguration(request: AuthleteFederationConfigurationRequest): Promise<AuthleteFederationConfigurationResponse>;
   // Client Management
   createClient(request: AuthleteClientCreateRequest): Promise<AuthleteClientCreateResponse>;
   // Dynamic Client Registration
@@ -365,19 +369,37 @@ export class AuthleteClientImpl implements AuthleteClient {
   }
 
   async federationRegistration(request: AuthleteFederationRegistrationRequest): Promise<AuthleteFederationRegistrationResponse> {
+    // Prepare the request body according to Authlete's specification
+    // The body should contain EITHER entityConfiguration OR trustChain, not both
+    const requestBody: { entityConfiguration?: string; trustChain?: string } = {};
+    
+    if (request.entityConfiguration) {
+      // Use entityConfiguration (JWT string)
+      requestBody.entityConfiguration = request.entityConfiguration;
+    } else if (request.trustChain && request.trustChain.length > 0) {
+      // Use trustChain (JSON string)
+      requestBody.trustChain = JSON.stringify(request.trustChain);
+    } else {
+      throw new Error('Either entityConfiguration or trustChain must be provided');
+    }
+    
     logger.logInfo(
       'Calling Authlete federation registration API',
       'AuthleteClient',
       {
-        clientName: request.client_name,
-        redirectUris: request.redirect_uris?.length || 0,
+        hasEntityConfiguration: !!requestBody.entityConfiguration,
+        hasTrustChain: !!requestBody.trustChain,
         endpoint: this.getApiPath('/federation/registration'),
-        requestPayload: JSON.stringify(request, null, 2)
+        requestPayload: JSON.stringify(requestBody, null, 2)
       }
     );
     
     try {
-      const response = await this.makeRequest<AuthleteFederationRegistrationResponse>('POST', this.getApiPath('/federation/registration'), request);
+      const response = await this.makeRequest<AuthleteFederationRegistrationResponse>(
+        'POST', 
+        this.getApiPath('/federation/registration'), 
+        requestBody
+      );
       
       logger.logInfo(
         'Authlete federation registration API response received',
@@ -400,12 +422,25 @@ export class AuthleteClientImpl implements AuthleteClient {
           ...(error instanceof Error && error.stack && { stack: error.stack })
         },
         context: {
-          clientName: request.client_name,
-          endpoint: this.getApiPath('/federation/registration')
+          endpoint: this.getApiPath('/federation/registration'),
+          hasEntityConfiguration: !!requestBody.entityConfiguration,
+          hasTrustChain: !!requestBody.trustChain
         }
       });
       throw error;
     }
+  }
+
+  async federationConfiguration(request: AuthleteFederationConfigurationRequest): Promise<AuthleteFederationConfigurationResponse> {
+    logger.logDebug(
+      'Calling Authlete federation configuration API',
+      'AuthleteClient',
+      {
+        endpoint: this.getApiPath('/federation/configuration')
+      }
+    );
+    
+    return this.makeRequest<AuthleteFederationConfigurationResponse>('POST', this.getApiPath('/federation/configuration'), request);
   }
 
   async createClient(request: AuthleteClientCreateRequest): Promise<AuthleteClientCreateResponse> {

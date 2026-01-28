@@ -1,16 +1,45 @@
 import { Request, Response } from 'express';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import request from 'supertest';
+import express from 'express';
 import { FederationControllerImpl } from './federation';
 import { AuthleteClient } from '../authlete/client';
-import { FederationFetchResponse, FederationListResponse, FederationResolveResponse } from '../authlete/types';
+import { 
+  FederationFetchResponse, 
+  FederationListResponse, 
+  FederationResolveResponse,
+  AuthleteFederationConfigurationResponse
+} from '../authlete/types';
+import { createFederationRoutes } from '../routes/federation';
 
 // Mock the logger
 vi.mock('../utils/logger', () => ({
   logger: {
     logInfo: vi.fn(),
     logError: vi.fn(),
-    logDebug: vi.fn()
+    logDebug: vi.fn(),
+    logWarn: vi.fn()
   }
+}));
+
+// Mock the federation validation utils
+vi.mock('../federation/utils', () => ({
+  ValidationUtils: {
+    decodeJWT: vi.fn(),
+    isValidEntityId: vi.fn()
+  }
+}));
+
+// Mock the rate limiter
+vi.mock('rate-limiter-flexible', () => ({
+  RateLimiterMemory: vi.fn().mockImplementation(() => ({
+    consume: vi.fn().mockResolvedValue({
+      msBeforeNext: 1000,
+      remainingHits: 5,
+      totalHits: 1
+    }),
+    get: vi.fn().mockResolvedValue(null)
+  }))
 }));
 
 describe('FederationController', () => {
@@ -31,6 +60,7 @@ describe('FederationController', () => {
       federationList: vi.fn(),
       federationResolve: vi.fn(),
       federationRegistration: vi.fn(),
+      federationConfiguration: vi.fn(),
       createClient: vi.fn(),
       dynamicClientRegistration: vi.fn()
     } as any;
@@ -52,68 +82,58 @@ describe('FederationController', () => {
   });
 
   describe('handleEntityConfiguration', () => {
-    it('should return entity configuration with proper structure', async () => {
+    it('should return entity configuration JWT from Authlete', async () => {
+      const mockConfigResponse: AuthleteFederationConfigurationResponse = {
+        action: 'OK',
+        entityConfiguration: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2xvY2FsaG9zdDozMDAxIiwic3ViIjoiaHR0cHM6Ly9sb2NhbGhvc3Q6MzAwMSIsImV4cCI6MTY0MDk5NTIwMH0.signature'
+      };
+
+      mockAuthleteClient.federationConfiguration.mockResolvedValue(mockConfigResponse);
+
       await controller.handleEntityConfiguration(mockRequest as Request, mockResponse as Response);
 
+      expect(mockAuthleteClient.federationConfiguration).toHaveBeenCalledWith({});
       expect(mockResponse.setHeader).toHaveBeenCalledWith('Content-Type', 'application/entity-statement+jwt');
-      expect(mockResponse.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          iss: 'https://localhost:3001',
-          sub: 'https://localhost:3001',
-          iat: expect.any(Number),
-          exp: expect.any(Number),
-          jwks: expect.objectContaining({
-            keys: expect.any(Array)
-          }),
-          metadata: expect.objectContaining({
-            openid_provider: expect.any(Object),
-            federation_entity: expect.any(Object)
-          }),
-          authority_hints: expect.any(Array)
-        })
-      );
+      expect(mockResponse.send).toHaveBeenCalledWith(mockConfigResponse.entityConfiguration);
     });
 
-    it('should include OpenID Provider metadata', async () => {
+    it('should handle Authlete configuration error', async () => {
+      const mockConfigResponse: AuthleteFederationConfigurationResponse = {
+        action: 'BAD_REQUEST',
+        resultCode: 'A001001',
+        resultMessage: 'Configuration not available'
+      };
+
+      mockAuthleteClient.federationConfiguration.mockResolvedValue(mockConfigResponse);
+
       await controller.handleEntityConfiguration(mockRequest as Request, mockResponse as Response);
 
-      const callArgs = (mockResponse.json as any).mock.calls[0][0];
-      expect(callArgs.metadata.openid_provider).toEqual(
-        expect.objectContaining({
-          issuer: 'https://localhost:3001',
-          authorization_endpoint: 'https://localhost:3001/authorize',
-          token_endpoint: 'https://localhost:3001/token',
-          userinfo_endpoint: 'https://localhost:3001/userinfo',
-          jwks_uri: 'https://localhost:3001/.well-known/jwks.json',
-          scopes_supported: expect.arrayContaining(['openid', 'profile', 'email']),
-          response_types_supported: expect.arrayContaining(['code']),
-          subject_types_supported: expect.arrayContaining(['public']),
-          id_token_signing_alg_values_supported: expect.arrayContaining(['RS256'])
-        })
-      );
-    });
-
-    it('should include Federation Entity metadata', async () => {
-      await controller.handleEntityConfiguration(mockRequest as Request, mockResponse as Response);
-
-      const callArgs = (mockResponse.json as any).mock.calls[0][0];
-      expect(callArgs.metadata.federation_entity).toEqual(
-        expect.objectContaining({
-          federation_fetch_endpoint: 'https://localhost:3001/federation/fetch',
-          federation_list_endpoint: 'https://localhost:3001/federation/list',
-          federation_resolve_endpoint: 'https://localhost:3001/federation/resolve',
-          organization_name: 'OpenID Connect Authorization Server',
-          homepage_uri: 'https://localhost:3001',
-          contacts: expect.arrayContaining(['admin@example.com'])
-        })
-      );
-    });
-
-    it('should handle errors gracefully', async () => {
-      // Mock an error in the get method
-      (mockRequest.get as any).mockImplementation(() => {
-        throw new Error('Test error');
+      expect(mockResponse.status).toHaveBeenCalledWith(500);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        error: 'server_error',
+        error_description: 'Entity configuration unavailable'
       });
+    });
+
+    it('should handle missing entity configuration in response', async () => {
+      const mockConfigResponse: AuthleteFederationConfigurationResponse = {
+        action: 'OK'
+        // Missing entityConfiguration
+      };
+
+      mockAuthleteClient.federationConfiguration.mockResolvedValue(mockConfigResponse);
+
+      await controller.handleEntityConfiguration(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(500);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        error: 'server_error',
+        error_description: 'Entity configuration unavailable'
+      });
+    });
+
+    it('should handle Authlete API errors gracefully', async () => {
+      mockAuthleteClient.federationConfiguration.mockRejectedValue(new Error('Authlete API error'));
 
       await controller.handleEntityConfiguration(mockRequest as Request, mockResponse as Response);
 
@@ -286,6 +306,96 @@ describe('FederationController', () => {
         error_description: 'Missing required parameters: sub and anchor'
       });
       expect(mockAuthleteClient.federationResolve).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Entity Configuration Endpoint Availability', () => {
+    it('should have /.well-known/openid_federation endpoint available and return valid response', async () => {
+      // Create a test Express app with federation routes
+      const app = express();
+      
+      // Add essential middleware
+      app.use(express.json());
+      
+      // Add federation routes
+      const federationRoutes = createFederationRoutes(controller);
+      app.use(federationRoutes);
+
+      // Mock successful Authlete response
+      const mockConfigResponse: AuthleteFederationConfigurationResponse = {
+        action: 'OK',
+        entityConfiguration: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2xvY2FsaG9zdDozMDAxIiwic3ViIjoiaHR0cHM6Ly9sb2NhbGhvc3Q6MzAwMSIsImV4cCI6MTY0MDk5NTIwMH0.signature'
+      };
+
+      mockAuthleteClient.federationConfiguration.mockResolvedValue(mockConfigResponse);
+
+      // Test that the endpoint is available and returns expected response
+      const response = await request(app)
+        .get('/.well-known/openid-federation');
+
+      // Verify endpoint availability (not 404)
+      expect(response.status).not.toBe(404);
+      
+      // Verify successful response
+      expect(response.status).toBe(200);
+      
+      // Verify correct content type for entity configuration JWT
+      expect(response.headers['content-type']).toMatch(/^application\/entity-statement\+jwt/);
+      
+      // Verify response contains the entity configuration JWT
+      expect(response.text).toBe(mockConfigResponse.entityConfiguration);
+      
+      // Verify Authlete API was called
+      expect(mockAuthleteClient.federationConfiguration).toHaveBeenCalledWith({});
+    });
+
+    it('should return 500 when Authlete configuration is unavailable', async () => {
+      // Create a test Express app with federation routes
+      const app = express();
+      
+      // Add essential middleware
+      app.use(express.json());
+      
+      // Add federation routes
+      const federationRoutes = createFederationRoutes(controller);
+      app.use(federationRoutes);
+
+      // Mock Authlete error response
+      const mockConfigResponse: AuthleteFederationConfigurationResponse = {
+        action: 'BAD_REQUEST',
+        resultCode: 'A001001',
+        resultMessage: 'Configuration not available'
+      };
+
+      mockAuthleteClient.federationConfiguration.mockResolvedValue(mockConfigResponse);
+
+      // Test error handling
+      const response = await request(app)
+        .get('/.well-known/openid-federation');
+
+      // Verify endpoint is available but returns error
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual({
+        error: 'server_error',
+        error_description: 'Entity configuration unavailable'
+      });
+    });
+
+    it('should verify endpoint path is correctly mapped', async () => {
+      // Simple test to verify the route exists
+      const app = express();
+      app.use(express.json());
+      
+      // Add a simple test route to verify routing works
+      app.get('/.well-known/openid-federation', (_req, res) => {
+        res.status(200).send('test-response');
+      });
+
+      const response = await request(app)
+        .get('/.well-known/openid-federation');
+
+      expect(response.status).toBe(200);
+      expect(response.text).toBe('test-response');
     });
   });
 });

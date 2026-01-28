@@ -69,8 +69,20 @@ export function initializeMockTrustChains() {
     trust_anchor_id: TRUST_ANCHOR_ID
   });
 
+  // Valid Federation Test Client (port 3006) - registered in Trust Anchor
+  MOCK_TRUST_CHAINS.set('https://localhost:3006', {
+    chain: [
+      'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.client-valid-entity-statement',
+      'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.trust-anchor-statement'
+    ],
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60),
+    sub: 'https://localhost:3006',
+    trust_anchor_id: TRUST_ANCHOR_ID
+  });
+
   // Invalid Client Trust Chain (client-2) - not registered
-  // Neither https://localhost:3004 nor http://localhost:3004 are registered - intentionally omitted
+  // https://localhost:3007 is intentionally NOT registered in Trust Anchor
 
   logger.logInfo(
     'Mock Trust Chains initialized',

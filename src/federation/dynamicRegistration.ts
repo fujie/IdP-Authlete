@@ -1,7 +1,7 @@
 import { logger } from '../utils/logger';
 import { TrustChainService, TrustChainValidationResult } from './trustChain';
 import { AuthleteClient } from '../authlete/client';
-import { AuthleteDynamicRegistrationRequest, AuthleteDynamicRegistrationResponse, AuthleteClientCreateRequest, AuthleteFederationRegistrationRequest } from '../authlete/types';
+import { AuthleteDynamicRegistrationRequest, AuthleteDynamicRegistrationResponse, AuthleteClientCreateRequest } from '../authlete/types';
 import { findPreRegisteredClient } from './preRegisteredClients';
 
 export interface DynamicRegistrationRequest {
@@ -101,16 +101,131 @@ export class DynamicRegistrationService {
         return validationError;
       }
 
-      // Step 3: Check for pre-registered client first (for both HTTP and HTTPS)
+      // Step 3: For HTTPS entity identifiers, try standard dynamic registration first
+      // Authlete may not have a specific federation/registration endpoint
+      const useAuthleteAPI = request.entity_id.startsWith('https://');
+      
+      if (useAuthleteAPI) {
+        // Try standard Authlete Dynamic Registration API for HTTPS entities
+        logger.logInfo(
+          'Using Authlete Dynamic Registration API for HTTPS entity identifier',
+          'DynamicRegistrationService',
+          {
+            entityId: request.entity_id,
+            trustAnchor: trustChainValidation.trustAnchor
+          }
+        );
+        
+        // Generate software statement (entity statement) for Federation
+        const softwareStatement = this.generateSoftwareStatement(request.entity_id, trustChainValidation);
+        
+        const dynamicRegistrationRequest: AuthleteDynamicRegistrationRequest = {
+          redirect_uris: request.redirect_uris,
+          response_types: ['code'],
+          grant_types: ['authorization_code', 'refresh_token'],
+          application_type: 'web',
+          subject_type: 'public',
+          id_token_signed_response_alg: 'RS256',
+          token_endpoint_auth_method: 'client_secret_basic',
+          // Federation-specific parameters as software statement
+          software_statement: softwareStatement,
+          // Optional properties - only include if present
+          ...(request.client_name && { client_name: request.client_name }),
+          ...(request.client_uri && { client_uri: request.client_uri }),
+          ...(request.logo_uri && { logo_uri: request.logo_uri }),
+          ...(request.contacts && { contacts: request.contacts }),
+          ...(request.tos_uri && { tos_uri: request.tos_uri }),
+          ...(request.policy_uri && { policy_uri: request.policy_uri }),
+          ...(request.jwks_uri && { jwks_uri: request.jwks_uri }),
+          ...(request.jwks && { jwks: request.jwks })
+        };
+
+        logger.logInfo(
+          'Registering client with Authlete Dynamic Registration API',
+          'DynamicRegistrationService',
+          {
+            entityId: request.entity_id,
+            clientName: request.client_name,
+            requestPayload: {
+              redirect_uris: dynamicRegistrationRequest.redirect_uris,
+              client_name: dynamicRegistrationRequest.client_name,
+              software_statement: dynamicRegistrationRequest.software_statement ? 'present' : 'missing',
+              fullRequest: JSON.stringify(dynamicRegistrationRequest, null, 2)
+            }
+          }
+        );
+
+        try {
+          const dynamicResponse = await this.authleteClient.dynamicClientRegistration(dynamicRegistrationRequest);
+
+          if (dynamicResponse.action === 'CREATED') {
+            logger.logInfo(
+              'Client registered successfully using Authlete Dynamic Registration API',
+              'DynamicRegistrationService',
+              {
+                entityId: request.entity_id,
+                clientId: dynamicResponse.client_id,
+                trustAnchor: trustChainValidation.trustAnchor
+              }
+            );
+
+            const registrationResponse: DynamicRegistrationResponse = {
+              client_id: dynamicResponse.client_id!,
+              client_secret: dynamicResponse.client_secret!,
+              client_id_issued_at: dynamicResponse.client_id_issued_at!,
+              client_secret_expires_at: dynamicResponse.client_secret_expires_at!,
+              redirect_uris: dynamicResponse.redirect_uris!,
+              trust_chain_validation: trustChainValidation,
+              authlete_registration: dynamicResponse,
+              // Optional properties - only include if present
+              ...(dynamicResponse.client_name && { client_name: dynamicResponse.client_name }),
+              ...(dynamicResponse.client_uri && { client_uri: dynamicResponse.client_uri }),
+              ...(dynamicResponse.logo_uri && { logo_uri: dynamicResponse.logo_uri }),
+              ...(dynamicResponse.contacts && { contacts: dynamicResponse.contacts }),
+              ...(dynamicResponse.tos_uri && { tos_uri: dynamicResponse.tos_uri }),
+              ...(dynamicResponse.policy_uri && { policy_uri: dynamicResponse.policy_uri }),
+              ...(dynamicResponse.jwks_uri && { jwks_uri: dynamicResponse.jwks_uri }),
+              ...(dynamicResponse.jwks && { jwks: dynamicResponse.jwks })
+            };
+
+            // Store client registration locally for reference
+            registeredClients.set(dynamicResponse.client_id!, registrationResponse);
+
+            return registrationResponse;
+          } else {
+            logger.logWarn(
+              'Authlete Dynamic Registration failed, trying client create API',
+              'DynamicRegistrationService',
+              {
+                entityId: request.entity_id,
+                dynamicAction: dynamicResponse.action,
+                dynamicResponse: dynamicResponse.responseContent
+              }
+            );
+          }
+        } catch (dynamicError) {
+          logger.logWarn(
+            'Authlete Dynamic Registration API error, trying client create API',
+            'DynamicRegistrationService',
+            {
+              entityId: request.entity_id,
+              dynamicError: dynamicError instanceof Error ? dynamicError.message : String(dynamicError)
+            }
+          );
+        }
+      }
+
+      // Step 4: Check for pre-registered client as fallback (for both HTTP and HTTPS)
       const preRegisteredClient = findPreRegisteredClient(request.entity_id);
       if (preRegisteredClient) {
         logger.logInfo(
-          'Using pre-registered client for Federation entity',
+          'Using pre-registered client as fallback for Federation entity',
           'DynamicRegistrationService',
           {
             entityId: request.entity_id,
             clientId: preRegisteredClient.clientId,
-            trustAnchor: trustChainValidation.trustAnchor
+            trustAnchor: trustChainValidation.trustAnchor,
+            reason: useAuthleteAPI ? 'Federation API failed' : 'HTTP entity'
           }
         );
 
@@ -145,138 +260,16 @@ export class DynamicRegistrationService {
         return registrationResponse;
       }
 
-      // Step 4: For HTTPS entity identifiers, try Authlete Federation Registration API
-      // For HTTP entity identifiers, fall back to standard dynamic registration
-      const useAuthleteAPI = request.entity_id.startsWith('https://');
-      
-      if (!useAuthleteAPI) {      }
-
-      // Step 4: Try Authlete Federation Registration API
+      // Step 5: Try standard dynamic registration API
       logger.logInfo(
-        'Using Authlete Federation Registration API for HTTPS entity identifier',
+        'Trying standard Authlete Dynamic Registration API',
         'DynamicRegistrationService',
         {
           entityId: request.entity_id,
-          trustAnchor: trustChainValidation.trustAnchor
-        }
-      );
-      
-      // Generate software statement (entity statement) for Federation
-      const softwareStatement = this.generateSoftwareStatement(request.entity_id, trustChainValidation);
-      
-      const federationRegistrationRequest: AuthleteFederationRegistrationRequest = {
-        redirect_uris: request.redirect_uris,
-        response_types: ['code'],
-        grant_types: ['authorization_code', 'refresh_token'],
-        application_type: 'web',
-        subject_type: 'public',
-        id_token_signed_response_alg: 'RS256',
-        token_endpoint_auth_method: 'client_secret_basic',
-        // Federation-specific parameters
-        software_statement: softwareStatement,
-        ...(trustChainValidation.chain && { trust_chain: trustChainValidation.chain }),
-        ...(trustChainValidation.trustAnchor && { trust_anchor_id: trustChainValidation.trustAnchor }),
-        // Optional properties - only include if present
-        ...(request.client_name && { client_name: request.client_name }),
-        ...(request.client_uri && { client_uri: request.client_uri }),
-        ...(request.logo_uri && { logo_uri: request.logo_uri }),
-        ...(request.contacts && { contacts: request.contacts }),
-        ...(request.tos_uri && { tos_uri: request.tos_uri }),
-        ...(request.policy_uri && { policy_uri: request.policy_uri }),
-        ...(request.jwks_uri && { jwks_uri: request.jwks_uri }),
-        ...(request.jwks && { jwks: request.jwks })
-      };
-
-      logger.logInfo(
-        'Registering client with Authlete Federation Registration API',
-        'DynamicRegistrationService',
-        {
-          entityId: request.entity_id,
-          clientName: request.client_name
+          reason: useAuthleteAPI ? 'Dynamic Registration API failed' : 'HTTP entity'
         }
       );
 
-      try {
-        const federationResponse = await this.authleteClient.federationRegistration(federationRegistrationRequest);
-
-        if (federationResponse.action === 'CREATED') {
-          logger.logInfo(
-            'Client registered successfully using Authlete Federation Registration API',
-            'DynamicRegistrationService',
-            {
-              entityId: request.entity_id,
-              clientId: federationResponse.client_id,
-              trustAnchor: trustChainValidation.trustAnchor
-            }
-          );
-
-          const registrationResponse: DynamicRegistrationResponse = {
-            client_id: federationResponse.client_id!,
-            client_secret: federationResponse.client_secret!,
-            client_id_issued_at: federationResponse.client_id_issued_at!,
-            client_secret_expires_at: federationResponse.client_secret_expires_at!,
-            redirect_uris: federationResponse.redirect_uris!,
-            trust_chain_validation: trustChainValidation,
-            authlete_registration: {
-              action: 'CREATED',
-              client_id: federationResponse.client_id,
-              client_secret: federationResponse.client_secret,
-              client_id_issued_at: federationResponse.client_id_issued_at,
-              client_secret_expires_at: federationResponse.client_secret_expires_at,
-              redirect_uris: federationResponse.redirect_uris,
-              client_name: federationResponse.client_name,
-              client_uri: federationResponse.client_uri,
-              logo_uri: federationResponse.logo_uri,
-              contacts: federationResponse.contacts,
-              tos_uri: federationResponse.tos_uri,
-              policy_uri: federationResponse.policy_uri,
-              jwks_uri: federationResponse.jwks_uri,
-              jwks: federationResponse.jwks,
-              response_types: federationResponse.response_types,
-              grant_types: federationResponse.grant_types,
-              application_type: federationResponse.application_type,
-              subject_type: federationResponse.subject_type,
-              id_token_signed_response_alg: federationResponse.id_token_signed_response_alg,
-              token_endpoint_auth_method: federationResponse.token_endpoint_auth_method
-            } as AuthleteDynamicRegistrationResponse,
-            // Optional properties - only include if present
-            ...(federationResponse.client_name && { client_name: federationResponse.client_name }),
-            ...(federationResponse.client_uri && { client_uri: federationResponse.client_uri }),
-            ...(federationResponse.logo_uri && { logo_uri: federationResponse.logo_uri }),
-            ...(federationResponse.contacts && { contacts: federationResponse.contacts }),
-            ...(federationResponse.tos_uri && { tos_uri: federationResponse.tos_uri }),
-            ...(federationResponse.policy_uri && { policy_uri: federationResponse.policy_uri }),
-            ...(federationResponse.jwks_uri && { jwks_uri: federationResponse.jwks_uri }),
-            ...(federationResponse.jwks && { jwks: federationResponse.jwks })
-          };
-
-          // Store client registration locally for reference
-          registeredClients.set(federationResponse.client_id!, registrationResponse);
-
-          return registrationResponse;
-        } else {
-          logger.logWarn(
-            'Authlete Federation Registration failed, trying fallback methods',
-            'DynamicRegistrationService',
-            {
-              entityId: request.entity_id,
-              federationAction: federationResponse.action,
-              federationResponse: federationResponse.responseContent
-            }
-          );
-        }
-      } catch (federationError) {
-        logger.logWarn(
-          'Authlete Federation Registration API error, trying fallback methods',
-          'DynamicRegistrationService',
-          {
-            entityId: request.entity_id,
-            federationError: federationError instanceof Error ? federationError.message : String(federationError)
-          }
-        );
-      }
-
-      // Step 5: Fallback to standard dynamic registration
       const authleteRegistrationRequest: AuthleteDynamicRegistrationRequest = {
         redirect_uris: request.redirect_uris,
         response_types: ['code'],
@@ -301,7 +294,7 @@ export class DynamicRegistrationService {
       };
 
       logger.logInfo(
-        'Registering client with Authlete',
+        'Registering client with Authlete Dynamic Registration API',
         'DynamicRegistrationService',
         {
           entityId: request.entity_id,
@@ -461,7 +454,7 @@ export class DynamicRegistrationService {
         return fallbackResponse;
       }
 
-      // Step 4: Create registration response (for successful dynamic registration)
+      // Step 6: Create registration response (for successful dynamic registration)
       const registrationResponse: DynamicRegistrationResponse = {
         client_id: authleteResponse.client_id!,
         client_secret: authleteResponse.client_secret!,
@@ -481,7 +474,7 @@ export class DynamicRegistrationService {
         ...(authleteResponse.jwks && { jwks: authleteResponse.jwks })
       };
 
-      // Step 5: Store client registration locally for reference (for successful dynamic registration)
+      // Step 7: Store client registration locally for reference (for successful dynamic registration)
       registeredClients.set(authleteResponse.client_id!, registrationResponse);
 
       logger.logInfo(

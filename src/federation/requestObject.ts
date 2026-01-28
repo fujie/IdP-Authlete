@@ -153,7 +153,9 @@ export class RequestObjectProcessor {
   async processClientRegistration(claims: RequestObjectClaims): Promise<ClientRegistrationResult> {
     try {
       // Check if client is using HTTPS scheme (required by OpenID Federation 1.0)
-      if (!claims.client_id.startsWith('https://')) {
+      // Allow HTTP for localhost development
+      const isLocalhost = this.isLocalhost(claims.client_id);
+      if (!claims.client_id.startsWith('https://') && !isLocalhost) {
         return {
           success: false,
           error: 'invalid_client_metadata',
@@ -167,7 +169,8 @@ export class RequestObjectProcessor {
         {
           clientId: claims.client_id,
           clientName: claims.client_metadata?.client_name,
-          redirectUris: claims.client_metadata?.redirect_uris
+          redirectUris: claims.client_metadata?.redirect_uris,
+          isLocalhost: isLocalhost
         }
       );
 
@@ -440,5 +443,17 @@ export class RequestObjectProcessor {
     }
 
     return merged;
+  }
+
+  /**
+   * Check if entity identifier is localhost
+   */
+  private isLocalhost(entityId: string): boolean {
+    try {
+      const url = new URL(entityId);
+      return url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+    } catch {
+      return false;
+    }
   }
 }

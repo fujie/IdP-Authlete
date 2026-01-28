@@ -1,20 +1,22 @@
 // OpenID Federation 1.0 types
 
 export interface EntityConfiguration {
-  iss: string;
-  sub: string;
-  iat: number;
-  exp: number;
-  jwks: {
-    keys: JWK[];
-  };
+  iss: string;                    // Entity ID
+  sub: string;                    // Same as iss for self-signed
+  iat: number;                    // Issued at timestamp
+  exp: number;                    // Expiration timestamp
+  jwks: JWKSet;                   // Public keys
   metadata?: {
     openid_provider?: OpenIDProviderMetadata;
     openid_relying_party?: OpenIDRelyingPartyMetadata;
     federation_entity?: FederationEntityMetadata;
   };
-  authority_hints?: string[];
+  authority_hints?: string[];     // Parent authorities
   trust_marks?: TrustMark[];
+}
+
+export interface JWKSet {
+  keys: JWK[];
 }
 
 export interface JWK {
@@ -94,9 +96,7 @@ export interface OpenIDRelyingPartyMetadata {
   policy_uri?: string;
   tos_uri?: string;
   jwks_uri?: string;
-  jwks?: {
-    keys: JWK[];
-  };
+  jwks?: JWKSet;
   sector_identifier_uri?: string;
   subject_type?: string;
   id_token_signed_response_alg?: string;
@@ -179,9 +179,7 @@ export interface TrustAnchorMetadata {
   sub: string;
   iat: number;
   exp: number;
-  jwks: {
-    keys: JWK[];
-  };
+  jwks: JWKSet;
   metadata: {
     federation_entity: FederationEntityMetadata;
   };
@@ -199,9 +197,7 @@ export interface IntermediateAuthorityMetadata {
   sub: string;
   iat: number;
   exp: number;
-  jwks: {
-    keys: JWK[];
-  };
+  jwks: JWKSet;
   metadata: {
     federation_entity: FederationEntityMetadata;
     openid_provider?: OpenIDProviderMetadata;
@@ -210,4 +206,98 @@ export interface IntermediateAuthorityMetadata {
   constraints?: {
     max_path_length?: number;
   };
+}
+
+// Enhanced federation interfaces from design document
+
+export interface EntityStatement {
+  jwt: string;
+  payload: {
+    iss: string;
+    sub: string;
+    iat?: number;
+    exp: number;
+    jwks?: JWKSet;
+    metadata?: EntityMetadata;
+    authorityHints?: string[];
+  };
+}
+
+export interface EntityMetadata {
+  openid_provider?: OpenIDProviderMetadata;
+  openid_relying_party?: OpenIDRelyingPartyMetadata;
+  federation_entity?: FederationEntityMetadata;
+}
+
+export interface ValidationResult {
+  isValid: boolean;
+  trustAnchor?: string;
+  clientMetadata?: ClientMetadata;
+  errors?: ValidationError[];
+}
+
+export interface ValidationError {
+  code: string;
+  message: string;
+  details?: any;
+}
+
+export interface ClientMetadata extends OpenIDRelyingPartyMetadata {
+  // Additional client metadata fields
+}
+
+export interface RequestObjectValidation {
+  isValid: boolean;
+  payload?: any;
+  errors?: string[];
+}
+
+export interface RegistrationParameters {
+  redirect_uris: string[];
+  client_name?: string;
+  client_uri?: string;
+  logo_uri?: string;
+  contacts?: string[];
+  tos_uri?: string;
+  policy_uri?: string;
+  jwks_uri?: string;
+  jwks?: JWKSet;
+  response_types?: string[];
+  grant_types?: string[];
+  application_type?: string;
+  subject_type?: string;
+  id_token_signed_response_alg?: string;
+  token_endpoint_auth_method?: string;
+}
+
+// Federation Registration Endpoint interfaces
+export interface FederationRegistrationRequest {
+  entityConfiguration?: string;  // JWT entity configuration
+  trustChain?: EntityStatement[]; // Array of entity statements
+  requestObject?: string;        // Signed federation request object
+}
+
+export interface FederationRegistrationResponse {
+  clientId: string;
+  clientSecret?: string;
+  entityStatement: string;       // JWT response from Authlete
+  trustAnchorId: string;
+}
+
+// Trust Chain interfaces
+export interface TrustChainValidationResult {
+  isValid: boolean;
+  trustAnchor?: string;
+  clientMetadata?: ClientMetadata;
+  errors?: ValidationError[];
+}
+
+// Test Client Configuration
+export interface TestClientConfig {
+  entityId: string;
+  port: number;
+  privateKey: string;
+  publicKey: JWK;
+  isValidInTrustAnchor: boolean;
+  metadata: ClientMetadata;
 }
