@@ -27,6 +27,9 @@ export class StartupValidator {
     // Validate server configuration
     this.validateServerConfig(result);
 
+    // Validate federation configuration
+    this.validateFederationConfig(result);
+
     result.isValid = result.errors.length === 0;
     return result;
   }
@@ -143,6 +146,38 @@ export class StartupValidator {
       if (!config.authlete.baseUrl.startsWith('https://')) {
         result.errors.push('Production environment requires HTTPS for Authlete API');
       }
+    }
+  }
+
+  private validateFederationConfig(result: ValidationResult): void {
+    // Validate federation configuration if enabled
+    if (config.federation && config.federation.enabled) {
+      logger.logInfo('Federation is enabled, validating configuration', 'StartupValidator', {
+        trustAnchorCount: config.federation.trustAnchors.length
+      });
+
+      // Validate trust anchors
+      if (config.federation.trustAnchors.length === 0) {
+        result.warnings.push('Federation is enabled but no trust anchors configured - dynamic registration will fail');
+      }
+
+      // Validate trust anchor URLs
+      for (const anchor of config.federation.trustAnchors) {
+        try {
+          const url = new URL(anchor);
+          if (!url.protocol.startsWith('https')) {
+            result.warnings.push(`Trust anchor should use HTTPS: ${anchor}`);
+          }
+        } catch (error) {
+          result.errors.push(`Invalid trust anchor URL format: ${anchor}`);
+        }
+      }
+
+      logger.logInfo('Federation configuration validated', 'StartupValidator', {
+        trustAnchors: config.federation.trustAnchors
+      });
+    } else {
+      logger.logInfo('Federation is disabled', 'StartupValidator');
     }
   }
 }

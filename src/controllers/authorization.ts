@@ -2,26 +2,132 @@ import { Request, Response } from 'express';
 import { AuthleteClient } from '../authlete/client';
 import { AuthorizationRequest, AuthorizationResponse } from '../authlete/types';
 import { logger } from '../utils/logger';
+import { RequestObjectProcessor } from '../federation/requestObject';
 
 export interface AuthorizationController {
   handleAuthorizationRequest(req: Request, res: Response): Promise<void>;
 }
 
 export class AuthorizationControllerImpl implements AuthorizationController {
-  constructor(private authleteClient: AuthleteClient) {}
+  private requestObjectProcessor: RequestObjectProcessor;
+
+  constructor(private authleteClient: AuthleteClient) {
+    this.requestObjectProcessor = new RequestObjectProcessor(authleteClient);
+  }
 
   async handleAuthorizationRequest(req: Request, res: Response): Promise<void> {
     const requestId = logger.generateRequestId();
     const childLogger = logger.createChildLogger({ requestId });
 
     try {
+      // Check for Request Object parameter (OpenID Federation 1.0)
+      const requestObject = req.query.request as string;
+      let authorizationParams: Record<string, string> = {};
+      let clientRegistrationResult: any = null;
+
+      if (requestObject) {
+        childLogger.logInfo(
+          'Processing authorization request with Request Object',
+          'AuthorizationController',
+          {
+            hasRequestObject: true,
+            requestObjectLength: requestObject.length
+          }
+        );
+
+        // Parse Request Object
+        const requestObjectResult = this.requestObjectProcessor.parseRequestObject(requestObject);
+        
+        if (!requestObjectResult.isValid) {
+          childLogger.logWarn(
+            'Invalid Request Object in authorization request',
+            'AuthorizationController',
+            {
+              error: requestObjectResult.error,
+              errorDescription: requestObjectResult.errorDescription
+            }
+          );
+
+          res.status(400).json({
+            error: requestObjectResult.error,
+            error_description: requestObjectResult.errorDescription
+          });
+          return;
+        }
+
+        const claims = requestObjectResult.claims!;
+        
+        // Check if client is already registered by checking if client_id is a URL
+        const isUnregisteredClient = claims.client_id.startsWith('https://');
+        
+        if (isUnregisteredClient && claims.client_metadata) {
+          childLogger.logInfo(
+            'Unregistered Federation client detected, attempting dynamic registration',
+            'AuthorizationController',
+            {
+              clientId: claims.client_id,
+              clientName: claims.client_metadata.client_name
+            }
+          );
+
+          // Attempt client registration
+          clientRegistrationResult = await this.requestObjectProcessor.processClientRegistration(claims);
+          
+          if (!clientRegistrationResult.success) {
+            childLogger.logWarn(
+              'Client registration failed for Federation client',
+              'AuthorizationController',
+              {
+                clientId: claims.client_id,
+                error: clientRegistrationResult.error,
+                errorDescription: clientRegistrationResult.errorDescription
+              }
+            );
+
+            res.status(400).json({
+              error: clientRegistrationResult.error,
+              error_description: clientRegistrationResult.errorDescription
+            });
+            return;
+          }
+
+          childLogger.logInfo(
+            'Client registration successful for Federation client',
+            'AuthorizationController',
+            {
+              originalClientId: claims.client_id,
+              registeredClientId: clientRegistrationResult.clientId
+            }
+          );
+
+          // Update client_id to use the registered client ID
+          claims.client_id = clientRegistrationResult.clientId;
+        }
+
+        // Extract authorization parameters from Request Object
+        authorizationParams = this.requestObjectProcessor.extractAuthorizationParameters(claims);
+        
+      } else {
+        // Standard OAuth 2.0 authorization request (no Request Object)
+        childLogger.logInfo(
+          'Processing standard authorization request (no Request Object)',
+          'AuthorizationController',
+          {
+            hasRequestObject: false,
+            clientId: req.query.client_id
+          }
+        );
+
+        authorizationParams = this.extractStandardAuthorizationParameters(req);
+      }
+
       // Parse and validate authorization request parameters
-      const queryParams = this.parseAuthorizationParameters(req);
-      const clientId = req.query.client_id as string;
-      const scopes = req.query.scope ? (req.query.scope as string).split(' ') : [];
-      const responseType = req.query.response_type as string;
-      const redirectUri = req.query.redirect_uri as string;
-      const state = req.query.state as string;
+      const queryParams = this.buildAuthorizationParameters(authorizationParams);
+      const clientId = authorizationParams.client_id;
+      const scopes = authorizationParams.scope ? authorizationParams.scope.split(' ') : [];
+      const responseType = authorizationParams.response_type;
+      const redirectUri = authorizationParams.redirect_uri;
+      const state = authorizationParams.state;
       
       // Create Authlete authorization request
       const authorizationRequest: AuthorizationRequest = {
@@ -43,11 +149,22 @@ export class AuthorizationControllerImpl implements AuthorizationController {
         redirectUri: redirectUri,
         state: state,
         outcome: outcome,
+        requestObjectUsed: !!requestObject,
+        clientRegistered: !!clientRegistrationResult?.success,
         ...(outcome === 'error' && { 
           errorCode: authorizationResponse.action,
           errorDescription: 'Authorization request failed'
         })
       });
+
+      // Store client registration info in session if applicable
+      if (clientRegistrationResult?.success) {
+        req.session.federationClientRegistration = {
+          originalClientId: (req.query.client_id as string) || authorizationParams.client_id,
+          registeredClientId: clientRegistrationResult.clientId!,
+          clientSecret: clientRegistrationResult.clientSecret!
+        };
+      }
 
       // Handle different response actions
       await this.handleAuthorizationResponse(req, res, authorizationResponse);
@@ -66,7 +183,8 @@ export class AuthorizationControllerImpl implements AuthorizationController {
         context: {
           clientId: req.query.client_id,
           responseType: req.query.response_type,
-          redirectUri: req.query.redirect_uri
+          redirectUri: req.query.redirect_uri as string,
+          hasRequestObject: !!req.query.request
         }
       });
 
@@ -89,36 +207,50 @@ export class AuthorizationControllerImpl implements AuthorizationController {
     }
   }
 
-  private parseAuthorizationParameters(req: Request): string {
-    // Extract OAuth 2.0 authorization parameters
-    const params = new URLSearchParams();
+  private extractStandardAuthorizationParameters(req: Request): Record<string, string> {
+    const params: Record<string, string> = {};
     
     // Required parameters
     if (req.query.response_type) {
-      params.append('response_type', req.query.response_type as string);
+      params.response_type = req.query.response_type as string;
     }
     if (req.query.client_id) {
-      params.append('client_id', req.query.client_id as string);
+      params.client_id = req.query.client_id as string;
+    }
+    if (req.query.redirect_uri) {
+      params.redirect_uri = req.query.redirect_uri as string;
     }
     
     // Optional parameters
-    if (req.query.redirect_uri) {
-      params.append('redirect_uri', req.query.redirect_uri as string);
-    }
     if (req.query.scope) {
-      params.append('scope', req.query.scope as string);
+      params.scope = req.query.scope as string;
     }
     if (req.query.state) {
-      params.append('state', req.query.state as string);
+      params.state = req.query.state as string;
+    }
+    if (req.query.nonce) {
+      params.nonce = req.query.nonce as string;
     }
     if (req.query.code_challenge) {
-      params.append('code_challenge', req.query.code_challenge as string);
+      params.code_challenge = req.query.code_challenge as string;
     }
     if (req.query.code_challenge_method) {
-      params.append('code_challenge_method', req.query.code_challenge_method as string);
+      params.code_challenge_method = req.query.code_challenge_method as string;
     }
 
-    return params.toString();
+    return params;
+  }
+
+  private buildAuthorizationParameters(params: Record<string, string>): string {
+    const urlParams = new URLSearchParams();
+    
+    Object.entries(params).forEach(([key, value]) => {
+      if (value) {
+        urlParams.append(key, value);
+      }
+    });
+
+    return urlParams.toString();
   }
 
   private async handleAuthorizationResponse(

@@ -17,9 +17,15 @@ export interface ServerConfig {
   sessionSecret: string;
 }
 
+export interface FederationConfig {
+  enabled: boolean;
+  trustAnchors: string[];
+}
+
 export interface AppConfig {
   authlete: AuthleteConfig;
   server: ServerConfig;
+  federation: FederationConfig;
 }
 
 function validateRequiredEnvVar(name: string, value: string | undefined): string {
@@ -44,6 +50,12 @@ function loadConfig(): AppConfig {
       port: parseInt(process.env.PORT || '3000', 10),
       nodeEnv: process.env.NODE_ENV || 'development',
       sessionSecret: validateRequiredEnvVar('SESSION_SECRET', process.env.SESSION_SECRET)
+    },
+    federation: {
+      enabled: process.env.FEDERATION_ENABLED === 'true',
+      trustAnchors: process.env.FEDERATION_TRUST_ANCHORS 
+        ? process.env.FEDERATION_TRUST_ANCHORS.split(',').map(anchor => anchor.trim())
+        : []
     }
   };
 }
