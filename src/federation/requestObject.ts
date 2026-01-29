@@ -382,12 +382,15 @@ export class RequestObjectProcessor {
       };
     }
 
-    // Validate client_id matches iss for Federation
-    if (claims.client_id !== claims.iss) {
+    // Validate client_id matches iss for Federation (only for unregistered clients)
+    // For registered clients, client_id will be the registered client ID (numeric)
+    // and iss will be the entity ID (URL)
+    const isUnregisteredClient = claims.client_id.startsWith('https://') || claims.client_id.startsWith('http://');
+    if (isUnregisteredClient && claims.client_id !== claims.iss) {
       return {
         isValid: false,
         error: 'invalid_request_object',
-        errorDescription: 'client_id must match iss claim in Request Object'
+        errorDescription: 'client_id must match iss claim in Request Object for unregistered clients'
       };
     }
 

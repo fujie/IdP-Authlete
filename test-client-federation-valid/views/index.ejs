@@ -69,6 +69,12 @@
         .button.secondary:hover {
             background-color: #1976D2;
         }
+        .button.danger {
+            background-color: #f44336;
+        }
+        .button.danger:hover {
+            background-color: #d32f2f;
+        }
         .user-info {
             background: #e8f5e9;
             padding: 15px;
@@ -179,7 +185,32 @@
             <a href="/health" class="button secondary" target="_blank">
                 ❤️ Health Check
             </a>
+            <% if (registeredClientId) { %>
+                <button onclick="clearRegistration()" class="button danger">
+                    🗑️ Clear Registration
+                </button>
+            <% } %>
         </div>
     </div>
+
+    <script>
+        function clearRegistration() {
+            if (confirm('Are you sure you want to clear the client registration?\n\nThis will:\n- Delete the stored client credentials\n- Require re-registration on next login\n\nNote: You should also delete the client from Authlete console.')) {
+                fetch('/clear-registration')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('✅ Registration cleared successfully!\n\nPlease also delete the client from Authlete console.');
+                            window.location.reload();
+                        } else {
+                            alert('❌ Failed to clear registration: ' + (data.message || 'Unknown error'));
+                        }
+                    })
+                    .catch(error => {
+                        alert('❌ Error clearing registration: ' + error.message);
+                    });
+            }
+        }
+    </script>
 </body>
 </html>

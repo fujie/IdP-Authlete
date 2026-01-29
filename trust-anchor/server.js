@@ -145,6 +145,10 @@ async function createEntityStatement(subordinateEntityId) {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Set view engine
+app.set('view engine', 'ejs');
+app.set('views', __dirname + '/views');
+
 // Entity Configuration endpoint (OpenID Federation)
 app.get('/.well-known/openid-federation', async (req, res) => {
   try {
@@ -291,10 +295,118 @@ app.get('/', (req, res) => {
       federationFetch: '/federation/fetch',
       federationList: '/federation/list',
       federationResolve: '/federation/resolve',
-      health: '/health'
+      health: '/health',
+      admin: '/admin'
     },
     subordinateEntities: TRUST_ANCHOR_CONFIG.subordinateEntities
   });
+});
+
+// Admin UI endpoint
+app.get('/admin', (req, res) => {
+  res.render('admin', {
+    config: TRUST_ANCHOR_CONFIG,
+    entities: TRUST_ANCHOR_CONFIG.subordinateEntities
+  });
+});
+
+// Admin API: Get entities
+app.get('/admin/entities', (req, res) => {
+  res.json({
+    success: true,
+    entities: TRUST_ANCHOR_CONFIG.subordinateEntities
+  });
+});
+
+// Admin API: Add entity
+app.post('/admin/entities', (req, res) => {
+  try {
+    const { entityId } = req.body;
+    
+    if (!entityId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Entity ID is required'
+      });
+    }
+    
+    // Validate URL format
+    try {
+      new URL(entityId);
+    } catch {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid URL format'
+      });
+    }
+    
+    // Check if already exists
+    if (TRUST_ANCHOR_CONFIG.subordinateEntities.includes(entityId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Entity already exists'
+      });
+    }
+    
+    // Add entity
+    TRUST_ANCHOR_CONFIG.subordinateEntities.push(entityId);
+    
+    console.log('Entity added:', entityId);
+    console.log('Current entities:', TRUST_ANCHOR_CONFIG.subordinateEntities);
+    
+    res.json({
+      success: true,
+      message: 'Entity added successfully',
+      entities: TRUST_ANCHOR_CONFIG.subordinateEntities
+    });
+  } catch (error) {
+    console.error('Error adding entity:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Admin API: Remove entity
+app.delete('/admin/entities', (req, res) => {
+  try {
+    const { entityId } = req.body;
+    
+    if (!entityId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Entity ID is required'
+      });
+    }
+    
+    // Check if exists
+    const index = TRUST_ANCHOR_CONFIG.subordinateEntities.indexOf(entityId);
+    if (index === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Entity not found'
+      });
+    }
+    
+    // Remove entity
+    TRUST_ANCHOR_CONFIG.subordinateEntities.splice(index, 1);
+    
+    console.log('Entity removed:', entityId);
+    console.log('Current entities:', TRUST_ANCHOR_CONFIG.subordinateEntities);
+    
+    res.json({
+      success: true,
+      message: 'Entity removed successfully',
+      entities: TRUST_ANCHOR_CONFIG.subordinateEntities
+    });
+  } catch (error) {
+    console.error('Error removing entity:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
 });
 
 // Error handler
