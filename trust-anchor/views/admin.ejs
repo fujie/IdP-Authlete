@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trust Anchor Management</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        .header h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        .header p {
+            color: #666;
+        }
+        .info-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .info-card h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 20px;
+        }
+        .info-item {
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .info-item strong {
+            color: #667eea;
+        }
+        .entities-section {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .entities-section h2 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .entity-list {
+            list-style: none;
+        }
+        .entity-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s;
+        }
+        .entity-item:hover {
+            background: #e9ecef;
+            transform: translateX(5px);
+        }
+        .entity-url {
+            font-family: monospace;
+            color: #333;
+            flex: 1;
+            word-break: break-all;
+        }
+        .entity-actions {
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        .add-entity-form {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 500;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            font-family: monospace;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+        .alert {
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 36px;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+        .stat-label {
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔐 Trust Anchor Management</h1>
+            <p>Manage subordinate entities in the OpenID Federation Trust Anchor</p>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value"><%= entities.length %></div>
+                <div class="stat-label">Registered Entities</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">✓</div>
+                <div class="stat-label">Trust Anchor Active</div>
+            </div>
+        </div>
+
+        <div class="info-card">
+            <h2>Trust Anchor Information</h2>
+            <div class="info-item">
+                <strong>Entity ID:</strong> <%= config.entityId %>
+            </div>
+            <div class="info-item">
+                <strong>Organization:</strong> <%= config.organizationName %>
+            </div>
+            <div class="info-item">
+                <strong>Homepage:</strong> <%= config.homepageUri %>
+            </div>
+            <div class="info-item">
+                <strong>Contacts:</strong> <%= config.contacts.join(', ') %>
+            </div>
+        </div>
+
+        <div class="entities-section">
+            <h2>Subordinate Entities</h2>
+            
+            <% if (entities.length === 0) { %>
+                <div class="empty-state">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                    </svg>
+                    <p>No subordinate entities registered yet</p>
+                </div>
+            <% } else { %>
+                <ul class="entity-list">
+                    <% entities.forEach(function(entity) { %>
+                        <li class="entity-item">
+                            <span class="entity-url"><%= entity %></span>
+                            <div class="entity-actions">
+                                <button onclick="testEntity('<%= entity %>')" class="btn btn-secondary">
+                                    🧪 Test
+                                </button>
+                                <button onclick="removeEntity('<%= entity %>')" class="btn btn-danger">
+                                    🗑️ Remove
+                                </button>
+                            </div>
+                        </li>
+                    <% }); %>
+                </ul>
+            <% } %>
+
+            <div class="add-entity-form">
+                <h3 style="margin-bottom: 15px;">Add New Entity</h3>
+                <form onsubmit="addEntity(event)">
+                    <div class="form-group">
+                        <label for="entityId">Entity ID (URL)</label>
+                        <input 
+                            type="url" 
+                            id="entityId" 
+                            name="entityId" 
+                            placeholder="https://example.com" 
+                            required
+                        >
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        ➕ Add Entity
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 30px;">
+            <a href="/health" class="btn btn-secondary" target="_blank">
+                ❤️ Health Check
+            </a>
+            <a href="/.well-known/openid-federation" class="btn btn-secondary" target="_blank">
+                📋 Entity Configuration
+            </a>
+            <a href="/federation/list" class="btn btn-secondary" target="_blank">
+                📜 Entity List API
+            </a>
+        </div>
+    </div>
+
+    <script>
+        function addEntity(event) {
+            event.preventDefault();
+            const entityId = document.getElementById('entityId').value;
+            
+            fetch('/admin/entities', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ entityId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('✅ Entity added successfully!');
+                    window.location.reload();
+                } else {
+                    alert('❌ Failed to add entity: ' + (data.message || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                alert('❌ Error adding entity: ' + error.message);
+            });
+        }
+
+        function removeEntity(entityId) {
+            if (confirm('Are you sure you want to remove this entity?\n\n' + entityId)) {
+                fetch('/admin/entities', {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ entityId })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('✅ Entity removed successfully!');
+                        window.location.reload();
+                    } else {
+                        alert('❌ Failed to remove entity: ' + (data.message || 'Unknown error'));
+                    }
+                })
+                .catch(error => {
+                    alert('❌ Error removing entity: ' + error.message);
+                });
+            }
+        }
+
+        function testEntity(entityId) {
+            const url = entityId + '/.well-known/openid-federation';
+            window.open(url, '_blank');
+        }
+    </script>
+</body>
+</html>

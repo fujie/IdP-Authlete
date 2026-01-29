@@ -69,12 +69,17 @@
         .button.secondary:hover {
             background-color: #1976D2;
         }
+        .button.danger {
+            background-color: #f44336;
+        }
+        .button.danger:hover {
+            background-color: #d32f2f;
+        }
         .user-info {
-            background: #ffebee;
+            background: #e8f5e9;
             padding: 15px;
             border-radius: 5px;
             margin: 20px 0;
-            border-left: 4px solid #f44336;
         }
         .token-info {
             background: #fff3e0;
@@ -94,20 +99,29 @@
             font-size: 12px;
             font-weight: bold;
         }
-        .warning {
-            background: #fff3e0;
+        .warning-box {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-left: 4px solid #ffc107;
             padding: 15px;
             border-radius: 5px;
-            border-left: 4px solid #ff9800;
             margin: 20px 0;
         }
-        .error-info {
-            background: #ffebee;
+        .warning-box h4 {
+            margin-top: 0;
+            color: #856404;
+        }
+        .error-box {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-left: 4px solid #dc3545;
             padding: 15px;
             border-radius: 5px;
             margin: 20px 0;
-            font-family: monospace;
-            font-size: 12px;
+        }
+        .error-box h4 {
+            margin-top: 0;
+            color: #721c24;
         }
     </style>
 </head>
@@ -119,52 +133,56 @@
             <p>This client has an entity ID NOT registered in the trust anchor</p>
         </div>
 
+        <div class="warning-box">
+            <h4>⚠️ Test Purpose</h4>
+            <p>This client is designed to test <strong>registration failure scenarios</strong>. The entity ID is intentionally NOT registered in the Trust Anchor, so dynamic registration should fail.</p>
+            <p><strong>To test successful registration:</strong> Add this entity ID to the Trust Anchor using the <a href="http://localhost:3010/admin" target="_blank">Trust Anchor Admin Panel</a>.</p>
+        </div>
+
         <div class="status">
             <h3>Client Status</h3>
             <p><strong>Entity ID:</strong> <%= config.entityId %></p>
             <p><strong>Registration Status:</strong> 
                 <% if (registeredClientId) { %>
-                    ⚠️ Unexpectedly Registered (Client ID: <%= registeredClientId %>)
-                    <br><small style="color: #f44336;">This should not have succeeded!</small>
+                    ⚠️ Registered (Client ID: <%= registeredClientId %>) - This is unexpected!
                 <% } else if (registrationError) { %>
-                    ✅ Registration Failed (As Expected)
+                    ✅ Not registered (Failed as expected)
                 <% } else { %>
-                    ❌ Not attempted yet
+                    ❌ Not registered yet
                 <% } %>
             </p>
             <p><strong>Trust Anchor:</strong> <%= config.trustAnchorId %></p>
-            <p><strong>Expected Behavior:</strong> <span style="color: #f44336;">Registration should FAIL</span></p>
         </div>
 
         <% if (registrationError) { %>
-            <div class="error-info">
-                <h4>✅ Registration Error (Expected):</h4>
-                <p><strong>Status:</strong> <%= registrationError.status %></p>
-                <p><strong>Message:</strong> <%= registrationError.message %></p>
-                <% if (registrationError.data) { %>
-                    <p><strong>Details:</strong> <%= JSON.stringify(registrationError.data, null, 2) %></p>
-                <% } %>
+            <div class="error-box">
+                <h4>✅ Expected Registration Failure</h4>
+                <p><strong>Error:</strong> <%= registrationError.data?.error || 'Unknown error' %></p>
+                <p><strong>Description:</strong> <%= registrationError.data?.error_description || registrationError.message %></p>
+                <p><strong>Status:</strong> <%= registrationError.status || 'N/A' %></p>
+                <p style="margin-top: 10px; font-size: 14px;">This is the expected behavior for an invalid client. To make this client valid, add its entity ID to the Trust Anchor.</p>
             </div>
         <% } %>
 
         <% if (user && user.authenticated) { %>
             <div class="user-info">
-                <h3>⚠️ Unexpected Authentication Success</h3>
+                <h3>⚠️ Authentication Successful (Unexpected)</h3>
                 <p><strong>User:</strong> <%= user.name %></p>
                 <p><strong>User ID:</strong> <%= user.id %></p>
-                <p style="color: #f44336;"><strong>WARNING:</strong> This client should not have been able to authenticate!</p>
+                <p><strong>Status:</strong> Authenticated via OpenID Federation Dynamic Registration</p>
+                <p style="color: #f44336; margin-top: 10px;">This should not have succeeded for an invalid client!</p>
             </div>
 
             <% if (accessToken) { %>
                 <div class="token-info">
-                    <h4>⚠️ Access Token (first 50 chars) - Should not exist:</h4>
+                    <h4>Access Token (first 50 chars):</h4>
                     <p><%= accessToken.substring(0, 50) %>...</p>
                 </div>
             <% } %>
 
             <% if (idToken) { %>
                 <div class="token-info">
-                    <h4>⚠️ ID Token (first 50 chars) - Should not exist:</h4>
+                    <h4>ID Token (first 50 chars):</h4>
                     <p><%= idToken.substring(0, 50) %>...</p>
                 </div>
             <% } %>
@@ -181,32 +199,25 @@
                 <div class="config-item"><strong>Registration Endpoint:</strong> <%= config.federationRegistrationEndpoint %></div>
             </div>
 
-            <div class="warning">
-                <h4>⚠️ Important Note</h4>
-                <p>This is an <strong>invalid</strong> test client. The entity ID <code><%= config.entityId %></code> is intentionally NOT registered in the trust anchor.</p>
-                <p><strong>Expected behavior:</strong> Dynamic registration should fail, and authentication should be prevented.</p>
-            </div>
-
             <div style="text-align: center; margin: 30px 0;">
                 <a href="/federation-login" class="button">
                     🔐 Try Login (Should Fail)
                 </a>
                 <br><br>
                 <a href="/test-registration" class="button secondary">
-                    🧪 Test Registration (Should Fail)
+                    🧪 Test Dynamic Registration
                 </a>
             </div>
 
             <div style="margin-top: 30px; padding: 15px; background: #ffebee; border-radius: 5px;">
-                <h4>Expected Test Flow:</h4>
+                <h4>Expected Behavior:</h4>
                 <ol>
-                    <li>Click "Try Login" to start the federation flow</li>
+                    <li>Click "Try Login" to start the flow</li>
                     <li>The client will attempt dynamic registration with the authorization server</li>
-                    <li><strong>Registration should FAIL</strong> because this entity ID is not in the trust anchor</li>
+                    <li><strong>Registration should FAIL</strong> because this client's entity ID is NOT registered in the trust anchor</li>
                     <li>You should see an error message indicating registration failure</li>
-                    <li>Authentication should be prevented</li>
                 </ol>
-                <p style="color: #f44336;"><strong>If registration succeeds, there may be a configuration issue!</strong></p>
+                <p style="margin-top: 15px;"><strong>To make this client work:</strong> Add the entity ID to the Trust Anchor using the <a href="http://localhost:3010/admin" target="_blank" style="color: #2196F3;">Admin Panel</a>.</p>
             </div>
         <% } %>
 
@@ -217,7 +228,35 @@
             <a href="/health" class="button secondary" target="_blank">
                 ❤️ Health Check
             </a>
+            <a href="http://localhost:3010/admin" class="button secondary" target="_blank">
+                🔧 Trust Anchor Admin
+            </a>
+            <% if (registeredClientId) { %>
+                <button onclick="clearRegistration()" class="button danger">
+                    🗑️ Clear Registration
+                </button>
+            <% } %>
         </div>
     </div>
+
+    <script>
+        function clearRegistration() {
+            if (confirm('Are you sure you want to clear the client registration?\n\nThis will:\n- Delete the stored client credentials\n- Require re-registration on next login\n\nNote: You should also delete the client from Authlete console.')) {
+                fetch('/clear-registration')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('✅ Registration cleared successfully!\n\nPlease also delete the client from Authlete console.');
+                            window.location.reload();
+                        } else {
+                            alert('❌ Failed to clear registration: ' + (data.message || 'Unknown error'));
+                        }
+                    })
+                    .catch(error => {
+                        alert('❌ Error clearing registration: ' + error.message);
+                    });
+            }
+        }
+    </script>
 </body>
 </html>

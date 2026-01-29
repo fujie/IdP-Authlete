@@ -107,6 +107,11 @@ export class AuthorizationControllerImpl implements AuthorizationController {
         // Extract authorization parameters from Request Object
         authorizationParams = this.requestObjectProcessor.extractAuthorizationParameters(claims);
         
+        // Update client_id in authorizationParams if client was registered
+        if (clientRegistrationResult?.success && clientRegistrationResult.clientId) {
+          authorizationParams.client_id = clientRegistrationResult.clientId;
+        }
+        
       } else {
         // Standard OAuth 2.0 authorization request (no Request Object)
         childLogger.logInfo(

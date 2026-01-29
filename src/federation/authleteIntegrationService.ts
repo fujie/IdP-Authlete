@@ -209,8 +209,32 @@ export class AuthleteIntegrationServiceImpl implements AuthleteIntegrationServic
       );
     }
 
+    // Extract client_id from either top-level or nested client object
+    const clientId = response.client_id || 
+                     (response.client?.clientId ? String(response.client.clientId) : undefined);
+    
+    // Extract client_secret from either top-level or nested client object
+    const clientSecret = response.client_secret || response.client?.clientSecret;
+    
+    // Extract redirect_uris from either top-level or nested client object
+    const redirectUris = response.redirect_uris || response.client?.redirectUris;
+
     // Validate required fields
-    if (!response.client_id) {
+    if (!clientId) {
+      logger.logError({
+        message: 'Missing client_id in Authlete response',
+        component: 'AuthleteIntegrationService',
+        error: {
+          name: 'FederationRegistrationError',
+          message: 'Missing client_id in Authlete response'
+        },
+        context: {
+          hasTopLevelClientId: !!response.client_id,
+          hasNestedClientId: !!response.client?.clientId,
+          responseKeys: Object.keys(response)
+        }
+      });
+      
       throw new FederationRegistrationError(
         'invalid_response',
         'Missing client_id in Authlete response',
@@ -219,7 +243,7 @@ export class AuthleteIntegrationServiceImpl implements AuthleteIntegrationServic
       );
     }
 
-    if (!response.redirect_uris || response.redirect_uris.length === 0) {
+    if (!redirectUris || redirectUris.length === 0) {
       throw new FederationRegistrationError(
         'invalid_response',
         'Missing redirect_uris in Authlete response',
@@ -230,20 +254,32 @@ export class AuthleteIntegrationServiceImpl implements AuthleteIntegrationServic
 
     // Extract and return processed response
     const result: ProcessedRegistrationResponse = {
-      clientId: response.client_id!,
-      redirectUris: response.redirect_uris!
+      clientId: clientId,
+      redirectUris: redirectUris
     };
 
     // Add optional fields only if they exist
-    if (response.client_secret) result.clientSecret = response.client_secret;
+    if (clientSecret) result.clientSecret = clientSecret;
     if (response.client_id_issued_at) result.clientIdIssuedAt = response.client_id_issued_at;
     if (response.client_secret_expires_at) result.clientSecretExpiresAt = response.client_secret_expires_at;
-    if (response.entityStatement) result.entityStatement = response.entityStatement;
-    if (response.trustAnchorId) result.trustAnchorId = response.trustAnchorId;
-    if (response.client_name) result.clientName = response.client_name;
-    if (response.client_uri) result.clientUri = response.client_uri;
+    
+    const entityStatement = response.entityStatement || response.responseContent;
+    if (entityStatement) result.entityStatement = entityStatement;
+    
+    const trustAnchorId = response.trustAnchorId || response.client?.trustAnchorId;
+    if (trustAnchorId) result.trustAnchorId = trustAnchorId;
+    
+    const clientName = response.client_name || response.client?.clientName;
+    if (clientName) result.clientName = clientName;
+    
+    const clientUri = response.client_uri || response.client?.clientUri;
+    if (clientUri) result.clientUri = clientUri;
+    
     if (response.logo_uri) result.logoUri = response.logo_uri;
-    if (response.contacts) result.contacts = response.contacts;
+    
+    const contacts = response.contacts || response.client?.contacts;
+    if (contacts) result.contacts = contacts;
+    
     if (response.tos_uri) result.tosUri = response.tos_uri;
     if (response.policy_uri) result.policyUri = response.policy_uri;
     if (response.jwks_uri) result.jwksUri = response.jwks_uri;
