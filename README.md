@@ -6,6 +6,7 @@ An OpenID Connect Authorization Server built with Node.js/TypeScript and Express
 
 - OAuth 2.0 Authorization Code Flow
 - **OpenID Federation Dynamic Registration** 🆕
+- **Exponential Backoff for Rate Limiting** 🆕
 - Integration with Authlete API
 - TypeScript support with strict type checking
 - Express.js web framework
@@ -22,6 +23,9 @@ An OpenID Connect Authorization Server built with Node.js/TypeScript and Express
 - **[セットアップガイド](FEDERATION_SETUP_README.md)** - 詳細な設定手順とトラブルシューティング
 - **[E2Eテスト結果](FEDERATION_E2E_TEST_RESULTS.md)** - 動作確認結果
 - **[統合実装概要](FEDERATION_INTEGRATION_SUMMARY.md)** - アーキテクチャと実装詳細
+
+### Rate Limiting
+- **[Rate Limit対策](RATE_LIMIT_HANDLING.md)** - Exponential Backoff実装の詳細
 
 ### 仕様とタスク
 - [要件定義](.kiro/specs/federation-dynamic-registration/requirements.md)
@@ -144,7 +148,7 @@ The application uses environment variables for configuration:
 | `NODE_ENV` | Environment (development/production/test) | development |
 | `SESSION_SECRET` | Session encryption secret | Required |
 | `HTTP_TIMEOUT` | HTTP request timeout (ms) | 10000 |
-| `HTTP_RETRY_ATTEMPTS` | Number of retry attempts | 3 |
+| `HTTP_RETRY_ATTEMPTS` | Number of retry attempts (recommended: 5 for rate limiting) | 3 |
 
 ## Project Structure
 
