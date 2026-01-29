@@ -89,13 +89,76 @@ export class AuthleteClientImpl implements AuthleteClient {
         return true;
       }
       
-      // Specific retryable status codes
-      if (status === 429) { // Too Many Requests
+      // Rate limiting (429 Too Many Requests)
+      if (status === 429) {
         return true;
       }
     }
     
     return false;
+  }
+
+  /**
+   * Extract retry delay from Retry-After header
+   * Supports both seconds (integer) and HTTP date formats
+   */
+  protected getRetryAfterDelay(error: any): number | null {
+    if (!axios.isAxiosError(error) || !error.response) {
+      return null;
+    }
+
+    const retryAfter = error.response.headers['retry-after'];
+    if (!retryAfter) {
+      return null;
+    }
+
+    // If it's a number, it's seconds
+    const seconds = parseInt(retryAfter, 10);
+    if (!isNaN(seconds)) {
+      return seconds * 1000; // Convert to milliseconds
+    }
+
+    // If it's a date string, calculate the difference
+    try {
+      const retryDate = new Date(retryAfter);
+      const now = new Date();
+      const delay = retryDate.getTime() - now.getTime();
+      return delay > 0 ? delay : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Calculate exponential backoff delay with jitter
+   * For rate limiting (429), respects Retry-After header if present
+   */
+  protected calculateBackoffDelay(attempt: number, error: any): number {
+    // Check for Retry-After header (especially for 429 errors)
+    const retryAfterDelay = this.getRetryAfterDelay(error);
+    if (retryAfterDelay !== null) {
+      logger.logInfo(
+        'Using Retry-After header for backoff delay',
+        'AuthleteClient',
+        {
+          retryAfterMs: retryAfterDelay,
+          retryAfterSeconds: Math.round(retryAfterDelay / 1000)
+        }
+      );
+      return retryAfterDelay;
+    }
+
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, ...
+    const baseDelay = 1000; // 1 second
+    const maxDelay = 32000; // 32 seconds max
+    const exponentialDelay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay);
+    
+    // Add jitter (±25% randomization to prevent thundering herd)
+    const jitterRange = 0.25;
+    const jitter = exponentialDelay * (Math.random() * jitterRange * 2 - jitterRange);
+    const totalDelay = exponentialDelay + jitter;
+    
+    return Math.max(totalDelay, 0);
   }
 
   private async callWithRetry<T>(
@@ -110,31 +173,61 @@ export class AuthleteClientImpl implements AuthleteClient {
       } catch (error) {
         lastError = error;
         
+        // Check if this is a rate limit error
+        const isRateLimited = axios.isAxiosError(error) && error.response?.status === 429;
+        
         // Don't retry on the last attempt or non-retryable errors
         if (attempt === maxRetries || !this.isRetryableError(error)) {
+          if (isRateLimited) {
+            logger.logError({
+              message: 'Rate limit exceeded and max retries reached',
+              component: 'AuthleteClient',
+              error: {
+                name: 'RateLimitError',
+                message: 'Authlete API rate limit exceeded',
+                code: 429
+              },
+              context: {
+                attempts: attempt,
+                maxRetries,
+                endpoint: (error as any)?.config?.url,
+                retryAfter: error.response?.headers['retry-after']
+              }
+            });
+          }
           break;
         }
         
-        // Calculate exponential backoff delay
-        const baseDelay = 1000; // 1 second
-        const backoffDelay = baseDelay * Math.pow(2, attempt - 1);
-        const jitter = Math.random() * 0.1 * backoffDelay; // Add 10% jitter
-        const totalDelay = backoffDelay + jitter;
+        // Calculate backoff delay
+        const backoffDelay = this.calculateBackoffDelay(attempt, error);
         
-        console.log(`Authlete API call failed (attempt ${attempt}/${maxRetries}), retrying in ${Math.round(totalDelay)}ms...`);
+        const logMessage = isRateLimited 
+          ? 'Rate limit hit, backing off before retry'
+          : 'Authlete API call failed, retrying with exponential backoff';
         
         logger.logWarn(
-          `Authlete API call failed, retrying`,
+          logMessage,
           'AuthleteClient',
           {
             attempt,
             maxRetries,
-            retryDelayMs: Math.round(totalDelay),
+            retryDelayMs: Math.round(backoffDelay),
+            retryDelaySeconds: Math.round(backoffDelay / 1000),
+            statusCode: (error as any)?.response?.status,
             error: error instanceof Error ? error.message : String(error),
-            endpoint: (error as any)?.config?.url
+            endpoint: (error as any)?.config?.url,
+            isRateLimited,
+            hasRetryAfterHeader: !!this.getRetryAfterDelay(error)
           }
         );
-        await this.delay(totalDelay);
+        
+        console.log(
+          `${isRateLimited ? '⚠️  Rate limit hit' : 'API call failed'} ` +
+          `(attempt ${attempt}/${maxRetries}), ` +
+          `retrying in ${Math.round(backoffDelay / 1000)}s...`
+        );
+        
+        await this.delay(backoffDelay);
       }
     }
     
