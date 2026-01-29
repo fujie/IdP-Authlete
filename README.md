@@ -1,33 +1,30 @@
 # OpenID Connect Authorization Server
 
-An OpenID Connect Authorization Server built with Node.js/TypeScript and Express.js, integrated with Authlete's cloud-based authorization service.
+OpenID Federation 1.0に対応したOAuth 2.0 / OpenID Connect認可サーバーです。Node.js/TypeScript + Express.jsで実装され、Authleteのクラウドベース認可サービスと統合されています。
 
-## Features
+## 主な機能
 
-- OAuth 2.0 Authorization Code Flow
-- **OpenID Federation Dynamic Registration** 🆕
-- **Exponential Backoff for Rate Limiting** 🆕
-- Integration with Authlete API
-- TypeScript support with strict type checking
-- Express.js web framework
-- Security middleware (Helmet)
-- Session management
-- Rate limiting capabilities
-- Comprehensive logging
-- Health check endpoint
+- ✅ OAuth 2.0 Authorization Code Flow
+- ✅ **OpenID Federation 動的クライアント登録**
+- ✅ **Trust Chain検証**
+- ✅ **Entity Discovery**
+- ✅ **Request Object処理（JWT）**
+- ✅ Exponential Backoffによるレート制限対策
+- ✅ Authlete API統合
+- ✅ TypeScript完全対応
+- ✅ セキュリティミドルウェア（Helmet）
+- ✅ セッション管理
+- ✅ レート制限
+- ✅ 包括的なロギング
+- ✅ ヘルスチェックエンドポイント
 
-## 📚 Documentation
+## 📚 ドキュメント
 
-### OpenID Federation
-- **[クイックスタートガイド](QUICKSTART.md)** - 最速で環境を起動
-- **[セットアップガイド](FEDERATION_SETUP_README.md)** - 詳細な設定手順とトラブルシューティング
-- **[E2Eテスト結果](FEDERATION_E2E_TEST_RESULTS.md)** - 動作確認結果
-- **[統合実装概要](FEDERATION_INTEGRATION_SUMMARY.md)** - アーキテクチャと実装詳細
+### クイックスタート
+- **[クイックスタートガイド](QUICKSTART.md)** - 5分で環境を起動
+- **[Federation実装ガイド](FEDERATION_README.md)** - 完全な実装ドキュメント
 
-### Rate Limiting
-- **[Rate Limit対策](RATE_LIMIT_HANDLING.md)** - Exponential Backoff実装の詳細
-
-### 仕様とタスク
+### 仕様書
 - [要件定義](.kiro/specs/federation-dynamic-registration/requirements.md)
 - [設計書](.kiro/specs/federation-dynamic-registration/design.md)
 - [タスクリスト](.kiro/specs/federation-dynamic-registration/tasks.md)
@@ -103,37 +100,30 @@ npm run lint:fix
 - **POST** `/federation/registration` - Dynamic client registration endpoint
 - **GET** `/.well-known/openid-federation` - Entity configuration endpoint
 
-## OpenID Federation Quick Start
+## OpenID Federation クイックスタート
 
-OpenID Federationを使用した動的クライアント登録のテスト環境を起動する手順：
-
-### 1. cloudflaredトンネルを起動
 ```bash
-# Trust Anchor用
-cloudflared tunnel --url http://localhost:3010
+# 1. 依存関係のインストール
+npm install && npm run build
+cd trust-anchor && npm install && cd ..
+cd test-client-federation-valid && npm install && cd ..
+cd test-client-federation-invalid && npm install && cd ..
 
-# Valid Client用
-cloudflared tunnel --url http://localhost:3006
-```
+# 2. cloudflaredトンネルを起動（別ターミナル）
+cloudflared tunnel --url http://localhost:3010  # Trust Anchor
+cloudflared tunnel --url http://localhost:3006  # Valid Client
 
-### 2. URL更新スクリプトを実行
-```bash
+# 3. URL設定を更新
 ./update-federation-urls.sh
+
+# 4. サーバーを起動
+cd trust-anchor && npm start                    # Trust Anchor
+cd test-client-federation-valid && npm start    # Valid Client
+cd test-client-federation-invalid && npm start  # Invalid Client
+npm start                                        # Authorization Server
 ```
 
-### 3. サーバーを起動
-```bash
-# Trust Anchor
-cd trust-anchor && npm start
-
-# Valid Test Client
-cd test-client-federation-valid && npm start
-
-# Authorization Server
-npm start
-```
-
-詳細は [QUICKSTART.md](QUICKSTART.md) を参照してください。
+詳細は **[QUICKSTART.md](QUICKSTART.md)** を参照してください。
 
 ## Configuration
 
