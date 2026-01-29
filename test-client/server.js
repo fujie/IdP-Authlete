@@ -108,6 +108,78 @@ app.get('/login', (req, res) => {
   });
 });
 
+// Start OpenID Federation Authorization Code Flow
+app.get('/federation-login', (req, res) => {
+  // Clear any existing OAuth state
+  delete req.session.oauthState;
+  delete req.session.accessToken;
+  delete req.session.refreshToken;
+  delete req.session.user;
+  
+  // Generate state parameter for CSRF protection
+  const state = uuidv4();
+  
+  // Store state in both session and memory store
+  req.session.oauthState = state;
+  oauthStates.set(state, {
+    timestamp: Date.now(),
+    sessionId: req.sessionID
+  });
+
+  console.log('Starting OpenID Federation flow with state:', state);
+  console.log('Session ID:', req.sessionID);
+  console.log('States in memory:', oauthStates.size);
+
+  // Save session explicitly
+  req.session.save((err) => {
+    if (err) {
+      console.error('Session save error:', err);
+      return res.status(500).send('Session error');
+    }
+
+    // Create Request Object for Federation flow
+    const requestObject = createFederationRequestObject(state);
+
+    // Build authorization URL with Request Object
+    const authUrl = new URL(`${OAUTH_CONFIG.authorizationServer}/authorize`);
+    authUrl.searchParams.append('request', requestObject);
+
+    console.log('Redirecting to Federation authorization server:', authUrl.toString());
+    res.redirect(authUrl.toString());
+  });
+});
+
+// Create Request Object for Federation flow (simplified for testing)
+function createFederationRequestObject(state) {
+  // In a real implementation, this would be a signed JWT
+  // For testing purposes, we'll create a base64-encoded JSON object
+  const entityId = `https://localhost:${PORT}`; // Use HTTPS scheme for Federation compliance
+  const requestObjectPayload = {
+    iss: entityId, // Client entity ID
+    aud: OAUTH_CONFIG.authorizationServer,
+    response_type: 'code',
+    client_id: entityId, // Use entity ID as client_id for Federation
+    redirect_uri: OAUTH_CONFIG.redirectUri,
+    scope: OAUTH_CONFIG.scope,
+    state: state,
+    nonce: uuidv4(),
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 300, // 5 minutes expiration
+    client_metadata: {
+      client_name: 'OpenID Federation Test Client',
+      client_uri: `https://localhost:${PORT}`, // Use HTTPS scheme
+      redirect_uris: [OAUTH_CONFIG.redirectUri],
+      response_types: ['code'],
+      grant_types: ['authorization_code'],
+      scope: OAUTH_CONFIG.scope,
+      contacts: ['admin@example.com']
+    }
+  };
+
+  // Base64 encode the payload (in production, this should be a signed JWT)
+  return Buffer.from(JSON.stringify(requestObjectPayload)).toString('base64');
+}
+
 // OpenID Connect Callback endpoint
 app.get('/callback', async (req, res) => {
   const { code, state, error, error_description } = req.query;
@@ -319,6 +391,54 @@ app.get('/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     service: 'openid-connect-test-client'
+  });
+});
+
+// Entity Configuration endpoint for OpenID Federation
+app.get('/.well-known/openid-federation', (req, res) => {
+  // Use HTTPS scheme for Federation compliance, even when running on HTTP
+  const baseUrl = `https://${req.get('host')}`;
+  const now = Math.floor(Date.now() / 1000);
+  const expiration = now + (24 * 60 * 60); // 24 hours
+
+  const entityConfiguration = {
+    iss: baseUrl,
+    sub: baseUrl,
+    iat: now,
+    exp: expiration,
+    jwks: {
+      keys: [] // In production, this would contain actual signing keys
+    },
+    metadata: {
+      openid_relying_party: {
+        client_name: 'OpenID Federation Test Client',
+        client_uri: baseUrl,
+        redirect_uris: [OAUTH_CONFIG.redirectUri],
+        response_types: ['code'],
+        grant_types: ['authorization_code'],
+        scope: OAUTH_CONFIG.scope,
+        contacts: ['admin@example.com'],
+        application_type: 'web'
+      },
+      federation_entity: {
+        organization_name: 'OpenID Federation Test Client',
+        homepage_uri: baseUrl,
+        contacts: ['admin@example.com']
+      }
+    },
+    authority_hints: [
+      'https://trust-anchor.example.com' // Example Trust Anchor
+    ]
+  };
+
+  // In a real implementation, this would be signed as a JWT
+  // For now, return the unsigned JSON for development/testing
+  res.setHeader('Content-Type', 'application/entity-statement+jwt');
+  res.json(entityConfiguration);
+
+  console.log('Entity Configuration requested:', {
+    issuer: entityConfiguration.iss,
+    subject: entityConfiguration.sub
   });
 });
 
