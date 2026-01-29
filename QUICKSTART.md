@@ -1,130 +1,143 @@
-# OpenID Federation クイックスタートガイド
+# クイックスタートガイド
 
-最速でテスト環境を起動する手順です。
+OpenID Federation動的クライアント登録のテスト環境を素早くセットアップするためのガイドです。
 
-## 🚀 5ステップで起動
+## 前提条件
 
-### 1. cloudflaredトンネルを起動
+- Node.js v18以上
+- npm v8以上
+- cloudflared（HTTPS公開用）
+- Authleteアカウント
+
+## 5分でセットアップ
+
+### 1. 依存関係のインストール
 
 ```bash
-# ターミナル1: Trust Anchor用
+# メインサーバー
+npm install && npm run build
+
+# Trust Anchor
+cd trust-anchor && npm install && cd ..
+
+# テストクライアント
+cd test-client-federation-valid && npm install && cd ..
+cd test-client-federation-invalid && npm install && cd ..
+```
+
+### 2. 環境変数の設定
+
+`.env`ファイルを作成:
+
+```bash
+# Authlete認証情報
+AUTHLETE_API_KEY=your_api_key
+AUTHLETE_API_SECRET=your_api_secret
+AUTHLETE_SERVICE_API_KEY=your_service_api_key
+AUTHLETE_SERVICE_API_SECRET=your_service_api_secret
+```
+
+### 3. cloudflaredトンネルの起動
+
+**ターミナル1（Trust Anchor用）:**
+```bash
 cloudflared tunnel --url http://localhost:3010
-# → 表示されたURLをメモ（例: https://abc.trycloudflare.com）
+# 表示されたURLをメモ（例: https://abc.trycloudflare.com）
+```
 
-# ターミナル2: Valid Client用
+**ターミナル2（Valid Client用）:**
+```bash
 cloudflared tunnel --url http://localhost:3006
-# → 表示されたURLをメモ（例: https://xyz.trycloudflare.com）
+# 表示されたURLをメモ（例: https://xyz.trycloudflare.com）
 ```
 
-### 2. URL更新スクリプトを実行
+### 4. URL設定の更新
 
 ```bash
-# ターミナル3
+# 自動更新スクリプトを実行
 ./update-federation-urls.sh
-# → メモしたURLを入力
+
+# プロンプトに従ってURLを入力
+Trust Anchor URL: https://abc.trycloudflare.com
+Valid Client URL: https://xyz.trycloudflare.com
 ```
 
-### 3. Authlete設定を更新
+### 5. Authlete設定
 
-Authlete管理画面で：
-- **Service Settings** → **Federation** → **Trust Anchor**
-- Trust AnchorのcloudflaredURLを設定
+Authlete管理画面で以下を設定:
 
-### 4. サーバーを起動
+1. **Service Settings** → **Federation**
+2. **Trust Anchor**: Trust AnchorのcloudflaredURLを入力
+3. **Save**をクリック
 
+### 6. サーバーの起動
+
+**ターミナル3（Trust Anchor）:**
 ```bash
-# ターミナル4: Trust Anchor
 cd trust-anchor && npm start
+```
 
-# ターミナル5: Valid Client
+**ターミナル4（Valid Client）:**
+```bash
 cd test-client-federation-valid && npm start
+```
 
-# ターミナル6: Invalid Client
+**ターミナル5（Invalid Client）:**
+```bash
 cd test-client-federation-invalid && npm start
+```
 
-# ターミナル7: Authorization Server
+**ターミナル6（Authorization Server）:**
+```bash
 npm start
 ```
 
-### 5. 動作確認
+## 動作確認
+
+### 正常系テスト（Valid Client）
+
+1. http://localhost:3006 にアクセス
+2. Trust Anchor管理画面（http://localhost:3010/admin）でValid ClientのEntity IDを登録
+3. "Start Federation Login"をクリック
+4. ✅ 登録成功 → 認可フロー開始
+
+### 異常系テスト（Invalid Client）
+
+1. http://localhost:3007 にアクセス
+2. Trust AnchorにInvalid ClientのEntity IDが**登録されていない**ことを確認
+3. "Start Federation Login"をクリック
+4. ✅ 登録失敗 → エラー画面表示
+
+## トラブルシューティング
+
+### 登録エラーが発生する場合
 
 ```bash
-# Valid Client（成功するはず）
-curl http://localhost:3006/test-registration | jq .
+# ヘルスチェック
+curl http://localhost:3010/health  # Trust Anchor
+curl http://localhost:3006/health  # Valid Client
+curl http://localhost:3001/health  # Authorization Server
 
-# Invalid Client（失敗するはず）
-curl http://localhost:3007/test-registration | jq .
+# Entity Configuration確認
+curl https://your-trust-anchor-url.trycloudflare.com/.well-known/openid-federation
 ```
 
-## ✅ 成功の確認
+### 認証情報をクリアする場合
 
-### Valid Client
-```json
-{
-  "success": true,
-  "clientId": "3768641751",
-  "clientSecret": "[SET]",
-  "message": "Dynamic registration successful"
-}
-```
-
-または（2回目以降）:
-```json
-{
-  "success": false,
-  "error": "Request failed with status code 500",
-  "details": {
-    "error": "invalid_request",
-    "error_description": "[A327605] Cannot create a new client because the entity ID is already in use."
-  }
-}
-```
-
-### Invalid Client
-```json
-{
-  "success": false,
-  "error": "Request failed with status code 500",
-  "details": {
-    "error": "validation_failed",
-    "error_description": "[A320301] Failed to resolve trust chains of the client"
-  },
-  "message": "✅ EXPECTED: Dynamic registration failed as expected"
-}
-```
-
-## 📚 詳細情報
-
-詳しい設定方法やトラブルシューティングは `FEDERATION_SETUP_README.md` を参照してください。
-
-## 🔄 URL変更時の手順
-
-cloudflaredを再起動した場合：
-
-1. 新しいURLをメモ
-2. `./update-federation-urls.sh` を実行
-3. Authlete設定を更新
-4. すべてのサーバーを再起動
-
-## ⚠️ よくあるエラー
-
-### エラーA320301: Trust Chain解決失敗
-- cloudflaredトンネルが起動しているか確認
-- URLが正しく設定されているか確認
-- Authlete設定を確認
-
-### エラーA327605: Entity ID重複
-- 正常な動作（既に登録済み）
-- Authlete管理画面でクライアントを削除して再テスト可能
-
-### サーバーが起動しない
 ```bash
-# 依存関係を再インストール
-npm install
-cd trust-anchor && npm install && cd ..
-cd test-client-federation-valid && npm install && cd ..
-cd test-client-federation-invalid && npm install && cd ..
+# Valid Client
+curl http://localhost:3006/clear-registration
 
-# ビルド
-npm run build
+# Invalid Client
+curl http://localhost:3007/clear-registration
 ```
+
+## 次のステップ
+
+詳細なドキュメント:
+- `FEDERATION_README.md` - 完全な実装ガイド
+- `.kiro/specs/federation-dynamic-registration/` - 仕様書
+
+## サポート
+
+問題が発生した場合は、各サーバーのログを確認してください。

@@ -44,3 +44,7 @@ Thumbs.db
 
 # Client credentials (persisted registration data)
 .client-credentials.json
+
+# Temporary test files
+*_cookies.txt
+cookies.txt
