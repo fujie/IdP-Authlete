@@ -238,6 +238,32 @@ export interface AuthleteFederationRegistrationResponse {
   // Standard Authlete response fields
   resultCode?: string;
   resultMessage?: string;
+  // Nested client object from Authlete
+  client?: {
+    number?: number;
+    serviceNumber?: number;
+    clientId?: number;
+    clientSecret?: string;
+    clientName?: string;
+    clientUri?: string;
+    redirectUris?: string[];
+    responseTypes?: string[];
+    grantTypes?: string[];
+    applicationType?: string;
+    contacts?: string[];
+    subjectType?: string;
+    idTokenSignAlg?: string;
+    userInfoSignAlg?: string;
+    tokenAuthMethod?: string;
+    tokenAuthSignAlg?: string;
+    entityId?: string;
+    trustAnchorId?: string;
+    trustChain?: string[];
+    trustChainExpiresAt?: number;
+    trustChainUpdatedAt?: number;
+    clientRegistrationTypes?: string[];
+    [key: string]: any;
+  };
 }
 
 // Authlete Dynamic Client Registration API types
