@@ -5,6 +5,7 @@ An OpenID Connect Authorization Server built with Node.js/TypeScript and Express
 ## Features
 
 - OAuth 2.0 Authorization Code Flow
+- **OpenID Federation Dynamic Registration** 🆕
 - Integration with Authlete API
 - TypeScript support with strict type checking
 - Express.js web framework
@@ -13,6 +14,19 @@ An OpenID Connect Authorization Server built with Node.js/TypeScript and Express
 - Rate limiting capabilities
 - Comprehensive logging
 - Health check endpoint
+
+## 📚 Documentation
+
+### OpenID Federation
+- **[クイックスタートガイド](QUICKSTART.md)** - 最速で環境を起動
+- **[セットアップガイド](FEDERATION_SETUP_README.md)** - 詳細な設定手順とトラブルシューティング
+- **[E2Eテスト結果](FEDERATION_E2E_TEST_RESULTS.md)** - 動作確認結果
+- **[統合実装概要](FEDERATION_INTEGRATION_SUMMARY.md)** - アーキテクチャと実装詳細
+
+### 仕様とタスク
+- [要件定義](.kiro/specs/federation-dynamic-registration/requirements.md)
+- [設計書](.kiro/specs/federation-dynamic-registration/design.md)
+- [タスクリスト](.kiro/specs/federation-dynamic-registration/tasks.md)
 
 ## Prerequisites
 
@@ -80,6 +94,42 @@ npm run lint:fix
 
 ### Root
 - **GET** `/` - Returns basic server information
+
+### OpenID Federation
+- **POST** `/federation/registration` - Dynamic client registration endpoint
+- **GET** `/.well-known/openid-federation` - Entity configuration endpoint
+
+## OpenID Federation Quick Start
+
+OpenID Federationを使用した動的クライアント登録のテスト環境を起動する手順：
+
+### 1. cloudflaredトンネルを起動
+```bash
+# Trust Anchor用
+cloudflared tunnel --url http://localhost:3010
+
+# Valid Client用
+cloudflared tunnel --url http://localhost:3006
+```
+
+### 2. URL更新スクリプトを実行
+```bash
+./update-federation-urls.sh
+```
+
+### 3. サーバーを起動
+```bash
+# Trust Anchor
+cd trust-anchor && npm start
+
+# Valid Test Client
+cd test-client-federation-valid && npm start
+
+# Authorization Server
+npm start
+```
+
+詳細は [QUICKSTART.md](QUICKSTART.md) を参照してください。
 
 ## Configuration
 
