@@ -330,7 +330,8 @@ export class FederationRegistrationEndpoint implements IFederationRegistrationEn
     trustAnchorId: string
   ): FederationRegistrationResponse {
     
-    if (authleteResponse.action !== 'CREATED') {
+    // Accept both CREATED and OK as success actions
+    if (authleteResponse.action !== 'CREATED' && authleteResponse.action !== 'OK') {
       throw new FederationRegistrationError(
         'registration_failed',
         `Authlete registration failed: ${authleteResponse.action} - ${authleteResponse.resultMessage || 'Unknown error'}`,
@@ -338,7 +339,14 @@ export class FederationRegistrationEndpoint implements IFederationRegistrationEn
       );
     }
 
-    if (!authleteResponse.client_id) {
+    // Extract client_id from either top-level or nested client object
+    const clientId = authleteResponse.client_id || 
+                     (authleteResponse.client?.clientId ? String(authleteResponse.client.clientId) : undefined);
+    
+    // Extract client_secret from either top-level or nested client object
+    const clientSecret = authleteResponse.client_secret || authleteResponse.client?.clientSecret;
+
+    if (!clientId) {
       throw new FederationRegistrationError(
         'server_error',
         'Authlete response missing client_id',
@@ -347,9 +355,9 @@ export class FederationRegistrationEndpoint implements IFederationRegistrationEn
     }
 
     return {
-      clientId: authleteResponse.client_id!,
-      ...(authleteResponse.client_secret && { clientSecret: authleteResponse.client_secret }),
-      entityStatement: authleteResponse.entityStatement || '',
+      clientId: clientId,
+      ...(clientSecret && { clientSecret: clientSecret }),
+      entityStatement: authleteResponse.entityStatement || authleteResponse.responseContent || '',
       trustAnchorId
     };
   }

@@ -233,6 +233,12 @@ export function validateInput() {
     // Validate and sanitize query parameters
     for (const [key, value] of Object.entries(req.query)) {
       if (typeof value === 'string') {
+        // Skip validation for 'request' parameter (JWT Request Object in OpenID Federation)
+        // JWTs contain dots and other characters that would trigger false positives
+        if (key === 'request') {
+          continue;
+        }
+        
         const threats = detectMaliciousPatterns(value);
         if (threats.length > 0) {
           securityThreats.push(...threats);
@@ -251,6 +257,12 @@ export function validateInput() {
     if (req.body && typeof req.body === 'object') {
       for (const [key, value] of Object.entries(req.body)) {
         if (typeof value === 'string') {
+          // Skip validation for JWT parameters in OpenID Federation
+          // These include: entity_configuration, request_object, trust_chain elements
+          if (key === 'entity_configuration' || key === 'request_object' || key === 'request') {
+            continue;
+          }
+          
           const threats = detectMaliciousPatterns(value);
           if (threats.length > 0) {
             securityThreats.push(...threats);
@@ -319,6 +331,14 @@ export function validateInput() {
  */
 export function validateAuthorizationRequest() {
   return (req: Request, res: Response, next: NextFunction): void => {
+    // OpenID Federation: If 'request' parameter is present (JWT Request Object),
+    // the required parameters are inside the JWT, not in query parameters
+    if (req.query.request) {
+      // Skip validation - parameters will be extracted from Request Object
+      next();
+      return;
+    }
+    
     const requiredParams = ['response_type', 'client_id'];
     const errors: ValidationError[] = [];
     
