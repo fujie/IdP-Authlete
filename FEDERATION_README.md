@@ -147,6 +147,18 @@ cd test-client-federation-invalid
 npm start
 ```
 
+**注意**: cloudflaredを使用してHTTPS公開する場合は、以下の手順を実行してください:
+
+```bash
+# 別ターミナルでcloudflaredトンネルを起動
+cloudflared tunnel --url http://localhost:3010  # Trust Anchor
+cloudflared tunnel --url http://localhost:3006  # Valid Client
+cloudflared tunnel --url http://localhost:3007  # Invalid Client
+
+# URL更新スクリプトを実行
+./update-federation-urls.sh
+```
+
 ## 使用方法
 
 ### Trust Anchorの管理
