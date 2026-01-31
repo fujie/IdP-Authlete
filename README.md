@@ -112,6 +112,7 @@ cd test-client-federation-invalid && npm install && cd ..
 # 2. cloudflaredトンネルを起動（別ターミナル）
 cloudflared tunnel --url http://localhost:3010  # Trust Anchor
 cloudflared tunnel --url http://localhost:3006  # Valid Client
+cloudflared tunnel --url http://localhost:3007  # Invalid Client
 
 # 3. URL設定を更新
 ./update-federation-urls.sh

@@ -28,6 +28,7 @@ echo ""
 # 新しいURLの入力
 read -p "🔗 Trust AnchorのcloudflaredURL (例: https://xxx.trycloudflare.com): " TRUST_ANCHOR_URL
 read -p "🔗 Valid Test ClientのcloudflaredURL (例: https://yyy.trycloudflare.com): " VALID_CLIENT_URL
+read -p "🔗 Invalid Test ClientのcloudflaredURL (例: https://zzz.trycloudflare.com): " INVALID_CLIENT_URL
 
 # URLの検証
 if [[ ! $TRUST_ANCHOR_URL =~ ^https:// ]]; then
@@ -40,12 +41,18 @@ if [[ ! $VALID_CLIENT_URL =~ ^https:// ]]; then
     exit 1
 fi
 
+if [[ ! $INVALID_CLIENT_URL =~ ^https:// ]]; then
+    echo "❌ エラー: Invalid Client URLはhttpsで始まる必要があります"
+    exit 1
+fi
+
 echo ""
 echo "=========================================="
 echo "📝 更新内容:"
 echo "=========================================="
 echo "Trust Anchor URL: $TRUST_ANCHOR_URL"
 echo "Valid Client URL: $VALID_CLIENT_URL"
+echo "Invalid Client URL: $INVALID_CLIENT_URL"
 echo ""
 read -p "この内容で更新しますか？ (y/n): " CONFIRM
 
@@ -76,7 +83,13 @@ sed -i.bak "s|^CONTACTS=.*|CONTACTS=admin@$VALID_CLIENT_DOMAIN|" test-client-fed
 
 # Invalid Test Client の .env を更新（Trust Anchor IDのみ）
 echo "  - test-client-federation-invalid/.env"
+sed -i.bak "s|^ENTITY_ID=.*|ENTITY_ID=$INVALID_CLIENT_URL|" test-client-federation-invalid/.env
+sed -i.bak "s|^CLIENT_URI=.*|CLIENT_URI=$INVALID_CLIENT_URL|" test-client-federation-invalid/.env
 sed -i.bak "s|^TRUST_ANCHOR_ID=.*|TRUST_ANCHOR_ID=$TRUST_ANCHOR_URL|" test-client-federation-invalid/.env
+
+# CONTACTSも更新（ドメイン部分のみ）
+INVALID_CLIENT_DOMAIN=$(echo $INVALID_CLIENT_URL | sed 's|https://||')
+sed -i.bak "s|^CONTACTS=.*|CONTACTS=admin@$INVALID_CLIENT_DOMAIN|" test-client-federation-invalid/.env
 
 # バックアップファイルを削除
 rm -f trust-anchor/.env.bak
@@ -95,6 +108,9 @@ grep "^ENTITY_ID=" trust-anchor/.env | cut -d'=' -f2
 echo ""
 echo "Valid Test Client:"
 grep "^ENTITY_ID=" test-client-federation-valid/.env | cut -d'=' -f2
+echo ""
+echo "Invalid Test Client:"
+grep "^ENTITY_ID=" test-client-federation-invalid/.env | cut -d'=' -f2
 echo ""
 echo "Trust Anchor ID (Valid Client):"
 grep "^TRUST_ANCHOR_ID=" test-client-federation-valid/.env | cut -d'=' -f2
@@ -115,4 +131,5 @@ echo ""
 echo "3. cloudflaredトンネルを起動してください:"
 echo "   - Trust Anchor (port 3010): cloudflared tunnel --url http://localhost:3010"
 echo "   - Valid Client (port 3006): cloudflared tunnel --url http://localhost:3006"
+echo "   - Invalid Client (port 3007): cloudflared tunnel --url http://localhost:3007"
 echo ""

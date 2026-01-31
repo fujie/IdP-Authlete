@@ -51,6 +51,12 @@ cloudflared tunnel --url http://localhost:3006
 # 表示されたURLをメモ（例: https://xyz.trycloudflare.com）
 ```
 
+**ターミナル3（Invalid Client用）:**
+```bash
+cloudflared tunnel --url http://localhost:3007
+# 表示されたURLをメモ（例: https://def.trycloudflare.com）
+```
+
 ### 4. URL設定の更新
 
 ```bash
@@ -60,6 +66,7 @@ cloudflared tunnel --url http://localhost:3006
 # プロンプトに従ってURLを入力
 Trust Anchor URL: https://abc.trycloudflare.com
 Valid Client URL: https://xyz.trycloudflare.com
+Invalid Client URL: https://def.trycloudflare.com
 ```
 
 ### 5. Authlete設定
@@ -72,22 +79,22 @@ Authlete管理画面で以下を設定:
 
 ### 6. サーバーの起動
 
-**ターミナル3（Trust Anchor）:**
+**ターミナル4（Trust Anchor）:**
 ```bash
 cd trust-anchor && npm start
 ```
 
-**ターミナル4（Valid Client）:**
+**ターミナル5（Valid Client）:**
 ```bash
 cd test-client-federation-valid && npm start
 ```
 
-**ターミナル5（Invalid Client）:**
+**ターミナル6（Invalid Client）:**
 ```bash
 cd test-client-federation-invalid && npm start
 ```
 
-**ターミナル6（Authorization Server）:**
+**ターミナル7（Authorization Server）:**
 ```bash
 npm start
 ```
