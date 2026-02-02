@@ -78,7 +78,7 @@ describe('StartupValidator', () => {
       expect(result.isValid).toBe(true);
       expect(result.errors).toHaveLength(0);
       expect(mockAuthleteClient.authorization).toHaveBeenCalledWith({
-        parameters: 'response_type=code&client_id=test&redirect_uri=https://example.com/callback'
+        parameters: 'response_type=code&client_id=2556995098&redirect_uri=https://example.com/callback'
       });
     });
 

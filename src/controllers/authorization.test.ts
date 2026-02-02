@@ -247,8 +247,8 @@ describe('OpenID Connect Authorization Server Properties', () => {
         // Core Property 1: All authorization requests should be validated through Authlete API
         expect(mockAuthleteClient.authorization).toHaveBeenCalledWith(
           expect.objectContaining({
-            parameters: expect.any(String),
-            clientId: expect.any(String)
+            parameters: expect.any(String)
+            // clientId can be undefined for invalid requests
           })
         );
 

@@ -3,6 +3,7 @@ import { AuthleteClient } from '../authlete/client';
 import { AuthorizationRequest, AuthorizationResponse } from '../authlete/types';
 import { logger } from '../utils/logger';
 import { RequestObjectProcessor } from '../federation/requestObject';
+// import { ClientLookupService } from '../federation/clientLookupService'; // 将来の使用のために保持
 
 export interface AuthorizationController {
   handleAuthorizationRequest(req: Request, res: Response): Promise<void>;
@@ -10,9 +11,11 @@ export interface AuthorizationController {
 
 export class AuthorizationControllerImpl implements AuthorizationController {
   private requestObjectProcessor: RequestObjectProcessor;
+  // private clientLookupService: ClientLookupService; // 将来の使用のために保持
 
   constructor(private authleteClient: AuthleteClient) {
     this.requestObjectProcessor = new RequestObjectProcessor(authleteClient);
+    // this.clientLookupService = new ClientLookupService(authleteClient); // 将来の使用のために保持
   }
 
   async handleAuthorizationRequest(req: Request, res: Response): Promise<void> {
@@ -57,60 +60,8 @@ export class AuthorizationControllerImpl implements AuthorizationController {
 
         const claims = requestObjectResult.claims!;
         
-        // Check if client is already registered by checking if client_id is a URL
-        const isUnregisteredClient = claims.client_id.startsWith('https://');
-        
-        if (isUnregisteredClient && claims.client_metadata) {
-          childLogger.logInfo(
-            'Unregistered Federation client detected, attempting dynamic registration',
-            'AuthorizationController',
-            {
-              clientId: claims.client_id,
-              clientName: claims.client_metadata.client_name
-            }
-          );
-
-          // Attempt client registration
-          clientRegistrationResult = await this.requestObjectProcessor.processClientRegistration(claims);
-          
-          if (!clientRegistrationResult.success) {
-            childLogger.logWarn(
-              'Client registration failed for Federation client',
-              'AuthorizationController',
-              {
-                clientId: claims.client_id,
-                error: clientRegistrationResult.error,
-                errorDescription: clientRegistrationResult.errorDescription
-              }
-            );
-
-            res.status(400).json({
-              error: clientRegistrationResult.error,
-              error_description: clientRegistrationResult.errorDescription
-            });
-            return;
-          }
-
-          childLogger.logInfo(
-            'Client registration successful for Federation client',
-            'AuthorizationController',
-            {
-              originalClientId: claims.client_id,
-              registeredClientId: clientRegistrationResult.clientId
-            }
-          );
-
-          // Update client_id to use the registered client ID
-          claims.client_id = clientRegistrationResult.clientId;
-        }
-
         // Extract authorization parameters from Request Object
         authorizationParams = this.requestObjectProcessor.extractAuthorizationParameters(claims);
-        
-        // Update client_id in authorizationParams if client was registered
-        if (clientRegistrationResult?.success && clientRegistrationResult.clientId) {
-          authorizationParams.client_id = clientRegistrationResult.clientId;
-        }
         
       } else {
         // Standard OAuth 2.0 authorization request (no Request Object)
@@ -141,7 +92,90 @@ export class AuthorizationControllerImpl implements AuthorizationController {
       };
 
       // Call Authlete /auth/authorization API
-      const authorizationResponse = await this.authleteClient.authorization(authorizationRequest);
+      let authorizationResponse: AuthorizationResponse;
+      
+      try {
+        authorizationResponse = await this.authleteClient.authorization(authorizationRequest);
+      } catch (error) {
+        // Check if this is an Entity ID not registered error (A327605 or similar)
+        const isEntityIdError = this.isEntityIdNotRegisteredError(error);
+        
+        if (isEntityIdError && requestObject) {
+          childLogger.logInfo(
+            'Entity ID not registered in Authlete, attempting dynamic registration',
+            'AuthorizationController',
+            {
+              clientId: clientId,
+              error: error instanceof Error ? error.message : String(error)
+            }
+          );
+
+          // Parse Request Object again to get claims for registration
+          const requestObjectResult = this.requestObjectProcessor.parseRequestObject(requestObject);
+          
+          if (requestObjectResult.isValid && requestObjectResult.claims) {
+            const claims = requestObjectResult.claims;
+            
+            // Attempt dynamic registration
+            clientRegistrationResult = await this.requestObjectProcessor.processClientRegistration(claims);
+            
+            if (!clientRegistrationResult.success) {
+              // Check if the error is "client_already_registered"
+              if (clientRegistrationResult.error === 'client_already_registered') {
+                childLogger.logInfo(
+                  'Client already registered, continuing with authorization',
+                  'AuthorizationController',
+                  {
+                    entityId: clientId
+                  }
+                );
+                
+                // Client is already registered, continue with authorization
+                // No need to store registration info as it already exists
+              } else {
+                childLogger.logWarn(
+                  'Client registration failed for Federation client',
+                  'AuthorizationController',
+                  {
+                    entityId: clientId,
+                    error: clientRegistrationResult.error,
+                    errorDescription: clientRegistrationResult.errorDescription
+                  }
+                );
+
+                res.status(400).json({
+                  error: clientRegistrationResult.error,
+                  error_description: clientRegistrationResult.errorDescription
+                });
+                return;
+              }
+            } else {
+              childLogger.logInfo(
+                'Client registration successful, retrying authorization',
+                'AuthorizationController',
+                {
+                  entityId: clientId
+                }
+              );
+
+              // Store client registration info in session
+              req.session.federationClientRegistration = {
+                entityId: clientId,
+                clientSecret: clientRegistrationResult.clientSecret!
+              };
+            }
+
+            // Retry authorization request after successful registration
+            authorizationResponse = await this.authleteClient.authorization(authorizationRequest);
+          } else {
+            // Cannot register without valid Request Object claims
+            throw error;
+          }
+        } else {
+          // Not an Entity ID error, re-throw
+          throw error;
+        }
+      }
 
       // Log authorization request with outcome
       const outcome = authorizationResponse.action === 'INTERACTION' || authorizationResponse.action === 'NO_INTERACTION' ? 'success' : 'error';
@@ -165,8 +199,7 @@ export class AuthorizationControllerImpl implements AuthorizationController {
       // Store client registration info in session if applicable
       if (clientRegistrationResult?.success) {
         req.session.federationClientRegistration = {
-          originalClientId: (req.query.client_id as string) || authorizationParams.client_id,
-          registeredClientId: clientRegistrationResult.clientId!,
+          entityId: authorizationParams.client_id, // entity_idを保存
           clientSecret: clientRegistrationResult.clientSecret!
         };
       }
@@ -351,5 +384,53 @@ export class AuthorizationControllerImpl implements AuthorizationController {
       error: 'invalid_request',
       error_description: 'Invalid authorization request parameters'
     };
+  }
+
+  /**
+   * Check if the error indicates that the Entity ID is not registered in Authlete
+   * 
+   * @param error Error from Authlete API
+   * @returns true if the error indicates Entity ID is not registered
+   */
+  private isEntityIdNotRegisteredError(error: any): boolean {
+    // Check for AuthleteApiError with specific error codes
+    if (error.name === 'AuthleteApiError' || error instanceof Error) {
+      const errorMessage = error.message || '';
+      const authleteResponse = (error as any).authleteResponse;
+      
+      // Check for error code A327605 (Entity ID already in use - but in this context, it means not found)
+      // or other client not found errors
+      if (authleteResponse) {
+        const resultMessage = authleteResponse.resultMessage || '';
+        const action = authleteResponse.action;
+        
+        // Check for specific error codes that indicate client not found
+        // A320301: Failed to resolve trust chains
+        // BAD_REQUEST with client not found message
+        if (action === 'BAD_REQUEST' || action === 'UNAUTHORIZED') {
+          // Check if the error message indicates client not found or unknown client
+          if (
+            resultMessage.includes('client') && 
+            (resultMessage.includes('not found') || 
+             resultMessage.includes('unknown') ||
+             resultMessage.includes('does not exist'))
+          ) {
+            return true;
+          }
+        }
+      }
+      
+      // Check error message for client not found indicators
+      if (
+        errorMessage.includes('client') && 
+        (errorMessage.includes('not found') || 
+         errorMessage.includes('unknown') ||
+         errorMessage.includes('does not exist'))
+      ) {
+        return true;
+      }
+    }
+    
+    return false;
   }
 }

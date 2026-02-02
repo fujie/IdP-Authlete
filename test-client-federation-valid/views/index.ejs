@@ -113,10 +113,10 @@
             <h3>Client Status</h3>
             <p><strong>Entity ID:</strong> <%= config.entityId %></p>
             <p><strong>Registration Status:</strong> 
-                <% if (registeredClientId) { %>
-                    ✅ Registered (Client ID: <%= registeredClientId %>)
+                <% if (hasClientSecret) { %>
+                    ✅ Registered with credentials
                 <% } else { %>
-                    ❌ Not registered yet
+                    ⚠️ Not registered or credentials missing
                 <% } %>
             </p>
             <p><strong>Trust Anchor:</strong> <%= config.trustAnchorId %></p>
@@ -185,7 +185,7 @@
             <a href="/health" class="button secondary" target="_blank">
                 ❤️ Health Check
             </a>
-            <% if (registeredClientId) { %>
+            <% if (hasClientSecret) { %>
                 <button onclick="clearRegistration()" class="button danger">
                     🗑️ Clear Registration
                 </button>
@@ -195,12 +195,12 @@
 
     <script>
         function clearRegistration() {
-            if (confirm('Are you sure you want to clear the client registration?\n\nThis will:\n- Delete the stored client credentials\n- Require re-registration on next login\n\nNote: You should also delete the client from Authlete console.')) {
+            if (confirm('Are you sure you want to clear the client registration?\n\nThis will:\n- Delete the stored client credentials\n- Require re-registration on next login\n\n⚠️ IMPORTANT: This will NOT delete the client from Authlete.\nIf you try to login again, you will get an error.\nYou must delete the client from Authlete console first.')) {
                 fetch('/clear-registration')
                     .then(response => response.json())
                     .then(data => {
                         if (data.success) {
-                            alert('✅ Registration cleared successfully!\n\nPlease also delete the client from Authlete console.');
+                            alert('✅ Registration cleared successfully!\n\n⚠️ IMPORTANT:\nBefore logging in again, please delete the client from Authlete console.\nEntity ID: <%= config.entityId %>');
                             window.location.reload();
                         } else {
                             alert('❌ Failed to clear registration: ' + (data.message || 'Unknown error'));

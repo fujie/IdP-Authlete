@@ -33,7 +33,7 @@ let publicJWK = null;
 let privateKey = null;
 
 // Dynamic client registration state
-let registeredClientId = null;
+// Note: entity_idを常にclient_idとして使用するため、registeredClientIdは不要
 let registeredClientSecret = null;
 
 // Load persisted credentials if available
@@ -45,10 +45,9 @@ function loadPersistedCredentials() {
       
       // Verify the credentials are for the current entity ID
       if (credentials.entityId === FEDERATION_CONFIG.entityId) {
-        registeredClientId = credentials.clientId;
         registeredClientSecret = credentials.clientSecret;
         console.log('✓ Loaded persisted client credentials');
-        console.log('  Client ID:', registeredClientId);
+        console.log('  Entity ID (client_id):', credentials.entityId);
         return true;
       } else {
         console.log('⚠️  Persisted credentials are for different entity ID, ignoring');
@@ -62,11 +61,10 @@ function loadPersistedCredentials() {
 }
 
 // Save credentials to persistent storage
-function saveCredentials(clientId, clientSecret) {
+function saveCredentials(clientSecret) {
   try {
     const credentials = {
       entityId: FEDERATION_CONFIG.entityId,
-      clientId: clientId,
       clientSecret: clientSecret,
       registeredAt: new Date().toISOString()
     };
@@ -84,6 +82,7 @@ function clearPersistedCredentials() {
       fs.unlinkSync(CREDENTIALS_FILE);
       console.log('✓ Cleared persisted credentials');
     }
+    registeredClientSecret = null;
   } catch (error) {
     console.error('Failed to clear credentials:', error.message);
   }
@@ -204,8 +203,8 @@ async function createFederationRequestObject(state, nonce) {
   const now = Math.floor(Date.now() / 1000);
   const expiration = now + 300; // 5 minutes
 
-  // Use registered client ID if available, otherwise use entity ID for initial registration
-  const clientId = registeredClientId || FEDERATION_CONFIG.entityId;
+  // OpenID Federation: 常にEntity IDをclient_idとして使用
+  const clientId = FEDERATION_CONFIG.entityId;
 
   const payload = {
     iss: FEDERATION_CONFIG.entityId,
@@ -213,22 +212,19 @@ async function createFederationRequestObject(state, nonce) {
     iat: now,
     exp: expiration,
     response_type: 'code',
-    client_id: clientId,
+    client_id: clientId, // 常にEntity ID
     redirect_uri: FEDERATION_CONFIG.redirectUri,
     scope: FEDERATION_CONFIG.scope,
     state: state,
     nonce: nonce
   };
 
-  console.log('Creating request object with client_id:', clientId);
+  console.log('Creating request object with entity_id as client_id:', clientId);
 
   // Sign the request object
   const jwt = await new SignJWT(payload)
     .setProtectedHeader({ alg: 'RS256', kid: publicJWK.kid })
     .sign(privateKey);
-
-  // Debug: Log the payload for verification
-  console.log('Request object payload:', JSON.stringify(payload, null, 2));
 
   return jwt;
 }
@@ -236,13 +232,14 @@ async function createFederationRequestObject(state, nonce) {
 // Perform dynamic client registration
 async function performDynamicRegistration() {
   // Check if already registered in this session
-  if (registeredClientId) {
-    console.log('Client already registered with ID:', registeredClientId);
-    return { clientId: registeredClientId, clientSecret: registeredClientSecret };
+  if (registeredClientSecret) {
+    console.log('Client already registered with entity_id:', FEDERATION_CONFIG.entityId);
+    return { entityId: FEDERATION_CONFIG.entityId, clientSecret: registeredClientSecret };
   }
 
   try {
     console.log('Performing dynamic client registration...');
+    console.log('Entity ID (client_id):', FEDERATION_CONFIG.entityId);
     
     // Create entity configuration
     const entityConfiguration = await createEntityConfiguration();
@@ -267,18 +264,42 @@ async function performDynamicRegistration() {
 
     console.log('Registration response:', response.data);
 
-    // Store registered client credentials
-    registeredClientId = response.data.client_id;
+    // Check if client is already registered
+    if (response.data.already_registered) {
+      console.log('⚠️  Client already registered');
+      
+      // Try to load persisted credentials
+      if (loadPersistedCredentials()) {
+        console.log('✓ Using persisted credentials');
+        console.log('Entity ID (client_id):', FEDERATION_CONFIG.entityId);
+        console.log('Client Secret:', registeredClientSecret ? '[SET]' : '[NOT SET]');
+        return { entityId: FEDERATION_CONFIG.entityId, clientSecret: registeredClientSecret };
+      }
+      
+      // If no persisted credentials, this means the client was registered in Authlete
+      // but the local credentials were cleared. We cannot proceed without the client_secret.
+      console.log('⚠️  Client is registered in Authlete but local credentials are missing');
+      console.log('⚠️  Please delete the client from Authlete dashboard or contact administrator');
+      
+      // Return a special error that indicates this situation
+      throw new Error(
+        'CREDENTIALS_MISSING: Client is registered in Authlete but local credentials are not available. ' +
+        'Please delete the client from Authlete dashboard (Entity ID: ' + FEDERATION_CONFIG.entityId + ') ' +
+        'or restore the credentials file.'
+      );
+    }
+
+    // Store registered client secret (entity_idは常に同じなので保存不要)
     registeredClientSecret = response.data.client_secret;
 
     // Save credentials to persistent storage
-    saveCredentials(registeredClientId, registeredClientSecret);
+    saveCredentials(registeredClientSecret);
 
     console.log('Dynamic registration successful!');
-    console.log('Client ID:', registeredClientId);
+    console.log('Entity ID (client_id):', FEDERATION_CONFIG.entityId);
     console.log('Client Secret:', registeredClientSecret ? '[SET]' : '[NOT SET]');
 
-    return { clientId: registeredClientId, clientSecret: registeredClientSecret };
+    return { entityId: FEDERATION_CONFIG.entityId, clientSecret: registeredClientSecret };
 
   } catch (error) {
     // Check if this is a duplicate registration error (Entity ID already exists)
@@ -290,7 +311,7 @@ async function performDynamicRegistration() {
       // Try to load persisted credentials
       if (loadPersistedCredentials()) {
         console.log('✓ Using persisted credentials');
-        return { clientId: registeredClientId, clientSecret: registeredClientSecret };
+        return { entityId: FEDERATION_CONFIG.entityId, clientSecret: registeredClientSecret };
       }
       
       // If no persisted credentials, provide helpful error
@@ -317,9 +338,10 @@ app.get('/', (req, res) => {
     accessToken: req.session.accessToken,
     idToken: req.session.idToken,
     config: FEDERATION_CONFIG,
-    registeredClientId: registeredClientId,
+    registeredClientId: registeredClientSecret ? FEDERATION_CONFIG.entityId : null, // entity_idをclient_idとして使用、ただしclient_secretがある場合のみ
     entityId: FEDERATION_CONFIG.entityId,
-    isValid: true
+    isValid: true,
+    hasClientSecret: !!registeredClientSecret
   });
 });
 
@@ -336,7 +358,7 @@ app.get('/federation-login', async (req, res) => {
     const registration = await performDynamicRegistration();
     
     console.log('=== Federation Login Flow ===');
-    console.log('Registered Client ID:', registration.clientId);
+    console.log('Entity ID (client_id):', registration.entityId);
     console.log('Has Client Secret:', !!registration.clientSecret);
     
     // Generate state and nonce parameters
@@ -434,11 +456,12 @@ app.get('/callback', async (req, res) => {
   }
 
   try {
-    // Exchange authorization code for access token using registered client credentials
+    // Exchange authorization code for access token using entity_id as client_id
     console.log('Exchanging authorization code for access token...');
+    console.log('Using entity_id as client_id:', FEDERATION_CONFIG.entityId);
     
-    if (!registeredClientId || !registeredClientSecret) {
-      throw new Error('Client not registered - missing credentials');
+    if (!registeredClientSecret) {
+      throw new Error('Client not registered - missing client secret');
     }
     
     const tokenResponse = await axios.post(
@@ -447,7 +470,7 @@ app.get('/callback', async (req, res) => {
         grant_type: 'authorization_code',
         code: code,
         redirect_uri: FEDERATION_CONFIG.redirectUri,
-        client_id: registeredClientId,
+        client_id: FEDERATION_CONFIG.entityId, // entity_idをclient_idとして使用
         client_secret: registeredClientSecret
       }),
       {
@@ -502,7 +525,7 @@ app.get('/test-registration', async (req, res) => {
     const registration = await performDynamicRegistration();
     res.json({
       success: true,
-      clientId: registration.clientId,
+      clientId: registration.entityId, // entity_idをclient_idとして使用
       clientSecret: registration.clientSecret ? '[SET]' : '[NOT SET]',
       entityId: FEDERATION_CONFIG.entityId,
       message: 'Dynamic registration successful'
@@ -549,7 +572,7 @@ app.get('/health', (req, res) => {
     service: 'openid-federation-test-client-valid',
     entityId: FEDERATION_CONFIG.entityId,
     port: PORT,
-    registered: !!registeredClientId
+    registered: !!registeredClientSecret
   });
 });
 
@@ -565,8 +588,6 @@ app.use((err, req, res, next) => {
 // Clear registration endpoint (for testing/debugging)
 app.get('/clear-registration', (req, res) => {
   clearPersistedCredentials();
-  registeredClientId = null;
-  registeredClientSecret = null;
   
   res.json({
     success: true,
@@ -591,7 +612,7 @@ async function startServer() {
       console.log(`- Trust Anchor: ${FEDERATION_CONFIG.trustAnchorId}`);
       console.log(`- Federation Registration Endpoint: ${FEDERATION_CONFIG.federationRegistrationEndpoint}`);
       console.log('- Key Pair: Generated');
-      console.log(`- Client Registration: ${registeredClientId ? 'Loaded from storage' : 'Not registered'}`);
+      console.log(`- Client Registration: ${registeredClientSecret ? 'Loaded from storage' : 'Not registered'}`);
       console.log('- Status: Ready');
     });
   } catch (error) {

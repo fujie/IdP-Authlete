@@ -58,7 +58,7 @@ export interface RequestObjectValidationResult {
 
 export interface ClientRegistrationResult {
   success: boolean;
-  clientId?: string;
+  entityId?: string; // URI形式のentity_id
   clientSecret?: string | undefined;
   error?: string;
   errorDescription?: string;
@@ -268,8 +268,7 @@ export class RequestObjectProcessor {
         'Client registration successful from Request Object with Entity Discovery',
         'RequestObjectProcessor',
         {
-          clientId: claims.client_id,
-          registeredClientId: registrationResult.client_id,
+          entityId: claims.client_id,
           trustAnchor: registrationResult.trust_chain_validation.trustAnchor,
           discoveryPerformed: true
         }
@@ -277,7 +276,7 @@ export class RequestObjectProcessor {
 
       return {
         success: true,
-        clientId: registrationResult.client_id,
+        entityId: claims.client_id, // URI形式のentity_idを返す
         clientSecret: registrationResult.client_secret || undefined
       };
 
