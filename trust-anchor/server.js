@@ -90,7 +90,11 @@ async function fetchSubordinateEntityConfiguration(entityId) {
     const response = await axios.get(url, {
       headers: {
         'Accept': 'application/entity-statement+jwt'
-      }
+      },
+      // 開発環境でのみ証明書検証を無効化（Cloudflared使用時）
+      httpsAgent: new (require('https').Agent)({
+        rejectUnauthorized: false
+      })
     });
     
     const jwt = response.data;
@@ -98,10 +102,20 @@ async function fetchSubordinateEntityConfiguration(entityId) {
     // Decode JWT to extract JWKS (without verification for simplicity in this test setup)
     const parts = jwt.split('.');
     if (parts.length !== 3) {
+      console.error('Invalid JWT format - expected 3 parts, got:', parts.length);
+      console.error('JWT:', jwt.substring(0, 100));
       throw new Error('Invalid JWT format');
     }
     
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+    // Base64URL decode
+    const base64UrlDecode = (str) => {
+      // Add padding if needed
+      const padding = '='.repeat((4 - (str.length % 4)) % 4);
+      const base64 = str.replace(/-/g, '+').replace(/_/g, '/') + padding;
+      return Buffer.from(base64, 'base64').toString('utf-8');
+    };
+    
+    const payload = JSON.parse(base64UrlDecode(parts[1]));
     console.log('Subordinate entity configuration fetched successfully');
     console.log('Subordinate JWKS:', JSON.stringify(payload.jwks, null, 2));
     

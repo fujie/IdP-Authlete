@@ -199,6 +199,29 @@ export class AuthleteIntegrationServiceImpl implements AuthleteIntegrationServic
   private processRegistrationResponse(
     response: AuthleteFederationRegistrationResponse
   ): ProcessedRegistrationResponse {
+    // Check for A327605 error (Entity ID already registered)
+    // This is not an error - it means the client is already registered
+    if (response.action === 'BAD_REQUEST' && 
+        response.resultCode === 'A327605') {
+      logger.logInfo(
+        'Client already registered with this entity ID',
+        'AuthleteIntegrationService',
+        {
+          resultCode: response.resultCode,
+          resultMessage: response.resultMessage
+        }
+      );
+      
+      // Return a minimal response indicating the client is already registered
+      // We cannot return the actual client_id or client_secret as Authlete doesn't provide them
+      throw new FederationRegistrationError(
+        'client_already_registered',
+        'Client with this entity ID is already registered',
+        200, // Use 200 status to indicate this is not a real error
+        response
+      );
+    }
+    
     // Validate response action - accept both OK and CREATED
     if (response.action !== 'CREATED' && response.action !== 'OK') {
       throw new FederationRegistrationError(
@@ -342,10 +365,18 @@ export class AuthleteIntegrationServiceImpl implements AuthleteIntegrationServic
     switch (statusCode) {
       case 400:
         // Check for specific Authlete error conditions
-        if (authleteResponse?.resultMessage?.includes('trust chain')) {
+        const resultCode = authleteResponse?.resultCode;
+        const resultMessage = authleteResponse?.resultMessage || '';
+        
+        // A327605: Entity ID already in use (client already registered)
+        if (resultCode === 'A327605' || resultMessage.includes('A327605')) {
+          return 'client_already_registered';
+        }
+        
+        if (resultMessage.includes('trust chain')) {
           return 'invalid_client_metadata';
         }
-        if (authleteResponse?.resultMessage?.includes('redirect_uri')) {
+        if (resultMessage.includes('redirect_uri')) {
           return 'invalid_redirect_uri';
         }
         return 'invalid_request';
@@ -386,10 +417,17 @@ export class AuthleteIntegrationServiceImpl implements AuthleteIntegrationServic
       'access_denied': 'The client is not authorized to register with this authorization server',
       'temporarily_unavailable': 'The registration service is temporarily unavailable due to rate limiting',
       'server_error': 'An internal server error occurred during registration',
-      'registration_failed': 'Client registration failed'
+      'registration_failed': 'Client registration failed',
+      'client_already_registered': 'Client with this entity ID is already registered'
     };
 
     const baseDescription = descriptions[errorCode] || 'An error occurred during registration';
+    
+    // For client_already_registered, return a success-like message
+    if (errorCode === 'client_already_registered') {
+      return baseDescription;
+    }
+    
     return `${baseDescription}. ${originalMessage}`;
   }
 
