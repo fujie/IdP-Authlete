@@ -29,8 +29,7 @@ declare module 'express-session' {
     
     // Federation-specific session data
     federationClientRegistration?: {
-      originalClientId: string;
-      registeredClientId: string;
+      entityId: string;
       clientSecret: string;
     };
   }
