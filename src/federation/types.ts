@@ -280,8 +280,11 @@ export interface FederationRegistrationRequest {
 export interface FederationRegistrationResponse {
   clientId: string;
   clientSecret?: string;
-  entityStatement: string;       // JWT response from Authlete
-  trustAnchorId: string;
+  entityStatement?: string;       // JWT response from Authlete (optional for already registered clients)
+  trustAnchorId?: string;
+  success?: boolean;              // Indicates if registration was successful
+  alreadyRegistered?: boolean;    // Indicates if client was already registered
+  message?: string;               // Optional message for additional context
 }
 
 // Trust Chain interfaces

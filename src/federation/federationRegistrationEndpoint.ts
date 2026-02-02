@@ -173,7 +173,35 @@ export class FederationRegistrationEndpoint implements IFederationRegistrationEn
         token_endpoint_auth_method: registrationParameters.token_endpoint_auth_method || 'client_secret_basic'
       };
 
-      const authleteResponse = await this.authleteIntegrationService.registerFederatedClient(authleteRequest);
+      let authleteResponse: AuthleteFederationRegistrationResponse;
+      
+      try {
+        authleteResponse = await this.authleteIntegrationService.registerFederatedClient(authleteRequest);
+      } catch (registrationError: any) {
+        // Check if this is a "client_already_registered" error
+        if (registrationError.name === 'FederationRegistrationError' && 
+            registrationError.errorCode === 'client_already_registered') {
+          logger.logInfo(
+            'Client already registered, returning success',
+            'FederationRegistrationEndpoint',
+            {
+              entityId,
+              errorCode: registrationError.errorCode
+            }
+          );
+          
+          // Return a success response indicating the client is already registered
+          return {
+            clientId: entityId,
+            success: true,
+            alreadyRegistered: true,
+            message: 'Client is already registered with this entity ID'
+          } as FederationRegistrationResponse;
+        }
+        
+        // Re-throw other errors
+        throw registrationError;
+      }
 
       // Step 5: Process Authlete response and return client credentials
       const registrationResponse = this.processAuthleteResponse(
@@ -357,8 +385,10 @@ export class FederationRegistrationEndpoint implements IFederationRegistrationEn
     return {
       clientId: clientId,
       ...(clientSecret && { clientSecret: clientSecret }),
-      entityStatement: authleteResponse.entityStatement || authleteResponse.responseContent || '',
-      trustAnchorId
+      ...(authleteResponse.entityStatement && { entityStatement: authleteResponse.entityStatement }),
+      ...(authleteResponse.responseContent && !authleteResponse.entityStatement && { entityStatement: authleteResponse.responseContent }),
+      trustAnchorId,
+      success: true
     };
   }
 
@@ -449,12 +479,29 @@ export function createFederationRegistrationHandler(
       const result = await endpoint.registerClient(federationRequest);
 
       // Return successful response
-      res.status(201).json({
-        client_id: result.clientId,
-        client_secret: result.clientSecret,
-        entity_statement: result.entityStatement,
-        trust_anchor_id: result.trustAnchorId
-      });
+      // If client is already registered, return 200 instead of 201
+      const statusCode = result.alreadyRegistered ? 200 : 201;
+      
+      const responseBody: any = {
+        client_id: result.clientId
+      };
+      
+      // Add optional fields only if they exist
+      if (result.clientSecret) {
+        responseBody.client_secret = result.clientSecret;
+      }
+      if (result.entityStatement) {
+        responseBody.entity_statement = result.entityStatement;
+      }
+      if (result.trustAnchorId) {
+        responseBody.trust_anchor_id = result.trustAnchorId;
+      }
+      if (result.alreadyRegistered) {
+        responseBody.already_registered = true;
+        responseBody.message = result.message || 'Client is already registered';
+      }
+      
+      res.status(statusCode).json(responseBody);
 
     } catch (error) {
       if (error instanceof FederationRegistrationError) {

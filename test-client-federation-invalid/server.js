@@ -33,7 +33,7 @@ let publicJWK = null;
 let privateKey = null;
 
 // Dynamic client registration state
-let registeredClientId = null;
+// Note: entity_idを常にclient_idとして使用するため、registeredClientIdは不要
 let registeredClientSecret = null;
 let registrationError = null;
 
@@ -46,10 +46,9 @@ function loadPersistedCredentials() {
       
       // Verify the credentials are for the current entity ID
       if (credentials.entityId === FEDERATION_CONFIG.entityId) {
-        registeredClientId = credentials.clientId;
         registeredClientSecret = credentials.clientSecret;
         console.log('✓ Loaded persisted client credentials');
-        console.log('  Client ID:', registeredClientId);
+        console.log('  Entity ID (client_id):', credentials.entityId);
         return true;
       } else {
         console.log('⚠️  Persisted credentials are for different entity ID, ignoring');
@@ -63,11 +62,10 @@ function loadPersistedCredentials() {
 }
 
 // Save credentials to persistent storage
-function saveCredentials(clientId, clientSecret) {
+function saveCredentials(clientSecret) {
   try {
     const credentials = {
       entityId: FEDERATION_CONFIG.entityId,
-      clientId: clientId,
       clientSecret: clientSecret,
       registeredAt: new Date().toISOString()
     };
@@ -85,6 +83,7 @@ function clearPersistedCredentials() {
       fs.unlinkSync(CREDENTIALS_FILE);
       console.log('✓ Cleared persisted credentials');
     }
+    registeredClientSecret = null;
   } catch (error) {
     console.error('Failed to clear credentials:', error.message);
   }
@@ -205,8 +204,8 @@ async function createFederationRequestObject(state, nonce) {
   const now = Math.floor(Date.now() / 1000);
   const expiration = now + 300; // 5 minutes
 
-  // Use registered client ID if available, otherwise use entity ID for initial registration
-  const clientId = registeredClientId || FEDERATION_CONFIG.entityId;
+  // OpenID Federation: 常にEntity IDをclient_idとして使用
+  const clientId = FEDERATION_CONFIG.entityId;
 
   const payload = {
     iss: FEDERATION_CONFIG.entityId,
@@ -214,14 +213,14 @@ async function createFederationRequestObject(state, nonce) {
     iat: now,
     exp: expiration,
     response_type: 'code',
-    client_id: clientId,
+    client_id: clientId, // 常にEntity ID
     redirect_uri: FEDERATION_CONFIG.redirectUri,
     scope: FEDERATION_CONFIG.scope,
     state: state,
     nonce: nonce
   };
 
-  console.log('Creating request object with client_id:', clientId);
+  console.log('Creating request object with entity_id as client_id:', clientId);
 
   // Sign the request object
   const jwt = await new SignJWT(payload)
@@ -237,15 +236,16 @@ async function createFederationRequestObject(state, nonce) {
 // Perform dynamic client registration
 async function performDynamicRegistration() {
   // Check if already registered in this session
-  if (registeredClientId) {
-    console.log('Client already registered with ID:', registeredClientId);
-    return { clientId: registeredClientId, clientSecret: registeredClientSecret };
+  if (registeredClientSecret) {
+    console.log('Client already registered with entity_id:', FEDERATION_CONFIG.entityId);
+    return { entityId: FEDERATION_CONFIG.entityId, clientSecret: registeredClientSecret };
   }
 
   try {
     console.log('Performing dynamic client registration...');
     console.log('⚠️  WARNING: This client uses an entity ID NOT registered in the trust anchor');
     console.log('Expected result: Registration should FAIL');
+    console.log('Entity ID (client_id):', FEDERATION_CONFIG.entityId);
     
     // Create entity configuration
     const entityConfiguration = await createEntityConfiguration();
@@ -271,18 +271,17 @@ async function performDynamicRegistration() {
     console.log('⚠️  UNEXPECTED: Registration response received:', response.data);
     console.log('⚠️  This should have failed since the entity ID is not in the trust anchor');
 
-    // Store registered client credentials
-    registeredClientId = response.data.client_id;
+    // Store registered client secret (entity_idは常に同じなので保存不要)
     registeredClientSecret = response.data.client_secret;
 
     // Save credentials to persistent storage
-    saveCredentials(registeredClientId, registeredClientSecret);
+    saveCredentials(registeredClientSecret);
 
     console.log('⚠️  UNEXPECTED: Dynamic registration succeeded when it should have failed!');
-    console.log('Client ID:', registeredClientId);
+    console.log('Entity ID (client_id):', FEDERATION_CONFIG.entityId);
     console.log('Client Secret:', registeredClientSecret ? '[SET]' : '[NOT SET]');
 
-    return { clientId: registeredClientId, clientSecret: registeredClientSecret };
+    return { entityId: FEDERATION_CONFIG.entityId, clientSecret: registeredClientSecret };
 
   } catch (error) {
     // Check if this is a duplicate registration error (Entity ID already exists)
@@ -294,7 +293,7 @@ async function performDynamicRegistration() {
       // Try to load persisted credentials
       if (loadPersistedCredentials()) {
         console.log('✓ Using persisted credentials');
-        return { clientId: registeredClientId, clientSecret: registeredClientSecret };
+        return { entityId: FEDERATION_CONFIG.entityId, clientSecret: registeredClientSecret };
       }
       
       // If no persisted credentials, provide helpful error
@@ -330,7 +329,7 @@ app.get('/', (req, res) => {
     accessToken: req.session.accessToken,
     idToken: req.session.idToken,
     config: FEDERATION_CONFIG,
-    registeredClientId: registeredClientId,
+    registeredClientId: FEDERATION_CONFIG.entityId, // entity_idをclient_idとして使用
     registrationError: registrationError,
     entityId: FEDERATION_CONFIG.entityId,
     isValid: false
@@ -351,6 +350,7 @@ app.get('/federation-login', async (req, res) => {
     
     // If we get here, registration unexpectedly succeeded
     console.log('⚠️  WARNING: Registration succeeded when it should have failed');
+    console.log('Entity ID (client_id):', registration.entityId);
     
     // Generate state and nonce parameters
     const state = uuidv4();
@@ -365,7 +365,7 @@ app.get('/federation-login', async (req, res) => {
 
     console.log('Starting OpenID Federation flow with unexpected successful registration');
     console.log('State:', state);
-    console.log('Registered Client ID:', registration.clientId);
+    console.log('Entity ID (client_id):', registration.entityId);
 
     // Save session explicitly
     req.session.save(async (err) => {
@@ -450,11 +450,12 @@ app.get('/callback', async (req, res) => {
   }
 
   try {
-    // Exchange authorization code for access token using registered client credentials
+    // Exchange authorization code for access token using entity_id as client_id
     console.log('⚠️  WARNING: Attempting token exchange for invalid client');
+    console.log('Using entity_id as client_id:', FEDERATION_CONFIG.entityId);
     
-    if (!registeredClientId || !registeredClientSecret) {
-      throw new Error('Client not registered - missing credentials');
+    if (!registeredClientSecret) {
+      throw new Error('Client not registered - missing client secret');
     }
     
     const tokenResponse = await axios.post(
@@ -463,7 +464,7 @@ app.get('/callback', async (req, res) => {
         grant_type: 'authorization_code',
         code: code,
         redirect_uri: FEDERATION_CONFIG.redirectUri,
-        client_id: registeredClientId,
+        client_id: FEDERATION_CONFIG.entityId, // entity_idをclient_idとして使用
         client_secret: registeredClientSecret
       }),
       {
@@ -520,7 +521,7 @@ app.get('/test-registration', async (req, res) => {
     const registration = await performDynamicRegistration();
     res.json({
       success: true,
-      clientId: registration.clientId,
+      clientId: registration.entityId, // entity_idをclient_idとして使用
       clientSecret: registration.clientSecret ? '[SET]' : '[NOT SET]',
       entityId: FEDERATION_CONFIG.entityId,
       message: '⚠️  WARNING: Dynamic registration succeeded when it should have failed',
@@ -572,7 +573,7 @@ app.get('/health', (req, res) => {
     service: 'openid-federation-test-client-invalid',
     entityId: FEDERATION_CONFIG.entityId,
     port: PORT,
-    registered: !!registeredClientId,
+    registered: !!registeredClientSecret,
     expectedBehavior: 'Registration should fail - entity ID not in trust anchor'
   });
 });
@@ -590,8 +591,6 @@ app.use((err, req, res, next) => {
 // Clear registration endpoint (for testing/debugging)
 app.get('/clear-registration', (req, res) => {
   clearPersistedCredentials();
-  registeredClientId = null;
-  registeredClientSecret = null;
   registrationError = null;
   
   res.json({
@@ -617,7 +616,7 @@ async function startServer() {
       console.log(`- Trust Anchor: ${FEDERATION_CONFIG.trustAnchorId}`);
       console.log(`- Federation Registration Endpoint: ${FEDERATION_CONFIG.federationRegistrationEndpoint}`);
       console.log('- Key Pair: Generated');
-      console.log(`- Client Registration: ${registeredClientId ? 'Loaded from storage' : 'Not registered'}`);
+      console.log(`- Client Registration: ${registeredClientSecret ? 'Loaded from storage' : 'Not registered'}`);
       console.log('- Status: Ready for dynamic registration (should fail)');
       console.log('');
       console.log('⚠️  IMPORTANT: This client uses an entity ID NOT registered in the trust anchor');
