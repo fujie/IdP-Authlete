@@ -1,8 +1,17 @@
-require('dotenv').config();
-const express = require('express');
-const crypto = require('crypto');
-const axios = require('axios');
-const { SignJWT, generateKeyPair, exportJWK } = require('jose');
+import dotenv from 'dotenv';
+import express from 'express';
+import crypto from 'crypto';
+import axios from 'axios';
+import https from 'https';
+import { SignJWT, generateKeyPair, exportJWK } from 'jose';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+dotenv.config();
+
+// ES modules equivalent of __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3010;
@@ -13,8 +22,27 @@ const TRUST_ANCHOR_CONFIG = {
   organizationName: process.env.ORGANIZATION_NAME || 'OpenID Federation Test Trust Anchor',
   homepageUri: process.env.HOMEPAGE_URI || 'https://trust-anchor.example.com',
   contacts: (process.env.CONTACTS || 'admin@trust-anchor.example.com').split(','),
-  subordinateEntities: (process.env.SUBORDINATE_ENTITIES || '').split(',').filter(e => e.trim())
+  subordinateEntities: (process.env.SUBORDINATE_ENTITIES || '').split(',').filter(e => e.trim()),
+  subordinateEntityTypes: (process.env.SUBORDINATE_ENTITY_TYPES || '').split(',').filter(e => e.trim())
 };
+
+// In-memory entity storage with entity type support
+// Structure: { entityId: string, entityType: 'openid_relying_party' | 'openid_provider', addedAt: number }
+const entityStorage = [];
+
+// Valid entity types
+const VALID_ENTITY_TYPES = ['openid_relying_party', 'openid_provider'];
+
+// Validate entity type
+function validateEntityType(entityType) {
+  if (!entityType) {
+    return { valid: false, error: 'Entity type is required' };
+  }
+  if (!VALID_ENTITY_TYPES.includes(entityType)) {
+    return { valid: false, error: `Invalid entity type. Must be one of: ${VALID_ENTITY_TYPES.join(', ')}` };
+  }
+  return { valid: true };
+}
 
 // Key pair storage
 let keyPair = null;
@@ -41,6 +69,35 @@ async function initializeKeyPair() {
     console.error('Failed to generate key pair:', error);
     process.exit(1);
   }
+}
+
+// Initialize entity storage from config
+function initializeEntityStorage() {
+  console.log('Initializing entity storage...');
+  
+  // Initialize subordinate entities with types from environment variables
+  TRUST_ANCHOR_CONFIG.subordinateEntities.forEach((entityId, index) => {
+    if (entityId) {
+      // Get entity type from corresponding index in subordinateEntityTypes array
+      // Default to 'openid_relying_party' if not specified
+      const entityType = TRUST_ANCHOR_CONFIG.subordinateEntityTypes[index] || 'openid_relying_party';
+      
+      // Validate entity type
+      if (!VALID_ENTITY_TYPES.includes(entityType)) {
+        console.warn(`  - Invalid entity type '${entityType}' for ${entityId}, defaulting to 'openid_relying_party'`);
+        entityType = 'openid_relying_party';
+      }
+      
+      entityStorage.push({
+        entityId: entityId,
+        entityType: entityType,
+        addedAt: Date.now()
+      });
+      console.log(`  - Registered ${entityType}: ${entityId}`);
+    }
+  });
+  
+  console.log(`Initialized ${entityStorage.length} entities in storage`);
 }
 
 // Create Trust Anchor Entity Configuration
@@ -92,7 +149,7 @@ async function fetchSubordinateEntityConfiguration(entityId) {
         'Accept': 'application/entity-statement+jwt'
       },
       // 開発環境でのみ証明書検証を無効化（Cloudflared使用時）
-      httpsAgent: new (require('https').Agent)({
+      httpsAgent: new https.Agent({
         rejectUnauthorized: false
       })
     });
@@ -127,7 +184,7 @@ async function fetchSubordinateEntityConfiguration(entityId) {
 }
 
 // Create Entity Statement for a subordinate entity
-async function createEntityStatement(subordinateEntityId) {
+async function createEntityStatement(subordinateEntityId, entityType) {
   const now = Math.floor(Date.now() / 1000);
   const expiration = now + (30 * 24 * 60 * 60); // 30 days
 
@@ -142,6 +199,11 @@ async function createEntityStatement(subordinateEntityId) {
     // Include the subordinate's public keys from their entity configuration
     jwks: subordinateConfig.jwks
   };
+
+  // Note: Trust Anchor entity statements should NOT copy the subordinate's metadata
+  // to avoid duplicates when Authlete resolves the trust chain.
+  // The subordinate's own entity configuration already contains the metadata.
+  // Trust Anchors should only include metadata policies or constraints if needed.
 
   // Sign the entity statement with the Trust Anchor's private key
   const jwt = await new SignJWT(payload)
@@ -200,10 +262,11 @@ app.get('/federation/fetch', async (req, res) => {
       return res.send(entityConfiguration);
     }
 
-    // Check if the subordinate entity is registered
-    if (!TRUST_ANCHOR_CONFIG.subordinateEntities.includes(sub)) {
+    // Check if the subordinate entity is registered in entity storage
+    const entity = entityStorage.find(e => e.entityId === sub);
+    if (!entity) {
       console.log('Entity not found in trust anchor:', sub);
-      console.log('Registered entities:', TRUST_ANCHOR_CONFIG.subordinateEntities);
+      console.log('Registered entities:', entityStorage.map(e => e.entityId));
       return res.status(404).json({ 
         error: 'not_found',
         error_description: 'Entity not found in trust anchor' 
@@ -211,7 +274,7 @@ app.get('/federation/fetch', async (req, res) => {
     }
 
     // Create and return entity statement for the subordinate
-    const entityStatement = await createEntityStatement(sub);
+    const entityStatement = await createEntityStatement(sub, entity.entityType);
     res.setHeader('Content-Type', 'application/entity-statement+jwt');
     res.send(entityStatement);
 
@@ -260,8 +323,9 @@ app.get('/federation/resolve', async (req, res) => {
       });
     }
 
-    // Check if the subordinate entity is registered
-    if (!TRUST_ANCHOR_CONFIG.subordinateEntities.includes(sub)) {
+    // Check if the subordinate entity is registered in entity storage
+    const entity = entityStorage.find(e => e.entityId === sub);
+    if (!entity) {
       return res.status(404).json({ 
         error: 'not_found',
         error_description: 'Entity not found in trust anchor' 
@@ -269,7 +333,7 @@ app.get('/federation/resolve', async (req, res) => {
     }
 
     // Return trust chain (simplified - just the entity statement)
-    const entityStatement = await createEntityStatement(sub);
+    const entityStatement = await createEntityStatement(sub, entity.entityType);
     
     res.json({
       trust_chain: [entityStatement],
@@ -320,7 +384,7 @@ app.get('/', (req, res) => {
 app.get('/admin', (req, res) => {
   res.render('admin', {
     config: TRUST_ANCHOR_CONFIG,
-    entities: TRUST_ANCHOR_CONFIG.subordinateEntities
+    entities: entityStorage
   });
 });
 
@@ -328,19 +392,32 @@ app.get('/admin', (req, res) => {
 app.get('/admin/entities', (req, res) => {
   res.json({
     success: true,
-    entities: TRUST_ANCHOR_CONFIG.subordinateEntities
+    entities: entityStorage.map(e => ({
+      entityId: e.entityId,
+      entityType: e.entityType,
+      addedAt: e.addedAt
+    }))
   });
 });
 
 // Admin API: Add entity
 app.post('/admin/entities', (req, res) => {
   try {
-    const { entityId } = req.body;
+    const { entityId, entityType } = req.body;
     
     if (!entityId) {
       return res.status(400).json({
         success: false,
         message: 'Entity ID is required'
+      });
+    }
+    
+    // Validate entity type
+    const typeValidation = validateEntityType(entityType);
+    if (!typeValidation.valid) {
+      return res.status(400).json({
+        success: false,
+        message: typeValidation.error
       });
     }
     
@@ -355,23 +432,38 @@ app.post('/admin/entities', (req, res) => {
     }
     
     // Check if already exists
-    if (TRUST_ANCHOR_CONFIG.subordinateEntities.includes(entityId)) {
+    if (entityStorage.find(e => e.entityId === entityId)) {
       return res.status(400).json({
         success: false,
         message: 'Entity already exists'
       });
     }
     
-    // Add entity
-    TRUST_ANCHOR_CONFIG.subordinateEntities.push(entityId);
+    // Add entity to storage
+    const newEntity = {
+      entityId: entityId,
+      entityType: entityType,
+      addedAt: Date.now()
+    };
+    entityStorage.push(newEntity);
     
-    console.log('Entity added:', entityId);
-    console.log('Current entities:', TRUST_ANCHOR_CONFIG.subordinateEntities);
+    // Also add to subordinateEntities for backward compatibility
+    if (!TRUST_ANCHOR_CONFIG.subordinateEntities.includes(entityId)) {
+      TRUST_ANCHOR_CONFIG.subordinateEntities.push(entityId);
+    }
+    
+    console.log('Entity added:', newEntity);
+    console.log('Current entities:', entityStorage.length);
     
     res.json({
       success: true,
       message: 'Entity added successfully',
-      entities: TRUST_ANCHOR_CONFIG.subordinateEntities
+      entity: newEntity,
+      entities: entityStorage.map(e => ({
+        entityId: e.entityId,
+        entityType: e.entityType,
+        addedAt: e.addedAt
+      }))
     });
   } catch (error) {
     console.error('Error adding entity:', error);
@@ -394,8 +486,8 @@ app.delete('/admin/entities', (req, res) => {
       });
     }
     
-    // Check if exists
-    const index = TRUST_ANCHOR_CONFIG.subordinateEntities.indexOf(entityId);
+    // Check if exists in entity storage
+    const index = entityStorage.findIndex(e => e.entityId === entityId);
     if (index === -1) {
       return res.status(404).json({
         success: false,
@@ -403,16 +495,26 @@ app.delete('/admin/entities', (req, res) => {
       });
     }
     
-    // Remove entity
-    TRUST_ANCHOR_CONFIG.subordinateEntities.splice(index, 1);
+    // Remove entity from storage
+    entityStorage.splice(index, 1);
+    
+    // Also remove from subordinateEntities for backward compatibility
+    const legacyIndex = TRUST_ANCHOR_CONFIG.subordinateEntities.indexOf(entityId);
+    if (legacyIndex !== -1) {
+      TRUST_ANCHOR_CONFIG.subordinateEntities.splice(legacyIndex, 1);
+    }
     
     console.log('Entity removed:', entityId);
-    console.log('Current entities:', TRUST_ANCHOR_CONFIG.subordinateEntities);
+    console.log('Current entities:', entityStorage.length);
     
     res.json({
       success: true,
       message: 'Entity removed successfully',
-      entities: TRUST_ANCHOR_CONFIG.subordinateEntities
+      entities: entityStorage.map(e => ({
+        entityId: e.entityId,
+        entityType: e.entityType,
+        addedAt: e.addedAt
+      }))
     });
   } catch (error) {
     console.error('Error removing entity:', error);
@@ -436,6 +538,7 @@ app.use((err, req, res, next) => {
 async function startServer() {
   try {
     await initializeKeyPair();
+    initializeEntityStorage();
     
     app.listen(PORT, () => {
       console.log(`\n========================================`);

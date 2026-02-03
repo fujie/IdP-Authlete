@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { SignJWT, generateKeyPair, importJWK, exportJWK } = require('jose');
+const { OPTrustChainValidator } = require('./lib/opTrustChainValidator');
 
 const app = express();
 const PORT = process.env.PORT || 3006;
@@ -35,6 +36,9 @@ let privateKey = null;
 // Dynamic client registration state
 // Note: entity_idを常にclient_idとして使用するため、registeredClientIdは不要
 let registeredClientSecret = null;
+
+// OP Trust Chain Validator instance
+let opValidator = null;
 
 // Load persisted credentials if available
 function loadPersistedCredentials() {
@@ -146,6 +150,79 @@ app.use(express.static('public'));
 // Set view engine
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+
+/**
+ * OP Validation Middleware
+ * 
+ * Validates that the OP is registered in the Trust Anchor before allowing authentication.
+ * Implements Requirements: 2.1, 2.2, 2.3, 3.1, 3.3
+ * 
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {Function} next - Express next middleware function
+ */
+async function validateOPMiddleware(req, res, next) {
+  const opEntityId = FEDERATION_CONFIG.authorizationServer;
+  
+  console.log('Validating OP trust chain', {
+    opEntityId,
+    sessionId: req.sessionID,
+    userAgent: req.get('user-agent')
+  });
+
+  try {
+    // Validate OP trust chain
+    const result = await opValidator.validateOP(opEntityId, {
+      sessionId: req.sessionID,
+      userAgent: req.get('user-agent')
+    });
+
+    if (!result.isValid) {
+      // Return 403 error if validation fails (Requirement 3.3)
+      console.error('OP trust chain validation failed, rejecting authentication', {
+        opEntityId,
+        errors: result.errors
+      });
+
+      return res.status(403).render('error', {
+        error: 'untrusted_op',
+        error_description: `OP ${opEntityId} is not registered in Trust Anchor`,
+        opEntityId: opEntityId,
+        errors: result.errors || []
+      });
+    }
+
+    // Set flag indicating OP was validated (Requirement 2.2)
+    req.opValidated = true;
+    req.session.opValidated = true;
+    req.session.opEntityId = opEntityId;
+    req.session.opValidatedAt = Date.now();
+
+    console.log('OP trust chain validation succeeded', {
+      opEntityId,
+      trustAnchor: result.trustAnchor,
+      cached: result.cached
+    });
+
+    next();
+  } catch (error) {
+    console.error('OP validation middleware error', {
+      opEntityId,
+      error: error.message,
+      stack: error.stack
+    });
+
+    return res.status(500).render('error', {
+      error: 'validation_error',
+      error_description: 'Failed to validate OP trust chain',
+      opEntityId: opEntityId,
+      errors: [{
+        code: 'validation_error',
+        message: error.message
+      }]
+    });
+  }
+}
 
 // Create entity configuration JWT
 async function createEntityConfiguration() {
@@ -346,7 +423,8 @@ app.get('/', (req, res) => {
 });
 
 // Start OpenID Federation Authorization Code Flow with Dynamic Registration
-app.get('/federation-login', async (req, res) => {
+// Implements Requirements: 2.1, 10.1
+app.get('/federation-login', validateOPMiddleware, async (req, res) => {
   try {
     // Clear any existing OAuth state
     delete req.session.oauthState;
@@ -411,6 +489,7 @@ app.get('/federation-login', async (req, res) => {
 });
 
 // OpenID Connect Callback endpoint
+// Implements Requirement: 10.2
 app.get('/callback', async (req, res) => {
   const { code, state, error, error_description } = req.query;
 
@@ -442,6 +521,35 @@ app.get('/callback', async (req, res) => {
     });
   }
 
+  // Verify OP was previously validated (Requirement 10.2)
+  const opEntityId = FEDERATION_CONFIG.authorizationServer;
+  const wasValidatedInSession = req.session.opValidated && req.session.opEntityId === opEntityId;
+  const isValidatedInCache = opValidator.isOPValidated(opEntityId);
+
+  if (!wasValidatedInSession && !isValidatedInCache) {
+    console.error('OP was not previously validated', {
+      opEntityId,
+      sessionValidated: wasValidatedInSession,
+      cacheValidated: isValidatedInCache
+    });
+
+    return res.status(403).render('error', {
+      error: 'op_not_validated',
+      error_description: `OP ${opEntityId} was not validated before callback`,
+      opEntityId: opEntityId,
+      errors: [{
+        code: 'op_not_validated',
+        message: 'OP must be validated before processing authentication callback'
+      }]
+    });
+  }
+
+  console.log('OP validation check passed for callback', {
+    opEntityId,
+    sessionValidated: wasValidatedInSession,
+    cacheValidated: isValidatedInCache
+  });
+
   // Clean up state
   if (memoryStateValid) {
     oauthStates.delete(state);
@@ -456,6 +564,31 @@ app.get('/callback', async (req, res) => {
   }
 
   try {
+    // Verify OP is validated before accepting tokens (Requirement 10.3)
+    if (!isValidatedInCache && !wasValidatedInSession) {
+      console.error('OP not validated before token exchange', {
+        opEntityId,
+        sessionValidated: wasValidatedInSession,
+        cacheValidated: isValidatedInCache
+      });
+
+      return res.status(403).render('error', {
+        error: 'op_not_validated',
+        error_description: `Cannot accept tokens from unvalidated OP ${opEntityId}`,
+        opEntityId: opEntityId,
+        errors: [{
+          code: 'op_not_validated',
+          message: 'OP must be validated before token exchange'
+        }]
+      });
+    }
+
+    console.log('OP validation check passed for token exchange', {
+      opEntityId,
+      sessionValidated: wasValidatedInSession,
+      cacheValidated: isValidatedInCache
+    });
+
     // Exchange authorization code for access token using entity_id as client_id
     console.log('Exchanging authorization code for access token...');
     console.log('Using entity_id as client_id:', FEDERATION_CONFIG.entityId);
@@ -595,10 +728,110 @@ app.get('/clear-registration', (req, res) => {
   });
 });
 
+// Clear OP validation cache endpoint (for testing/debugging)
+app.get('/clear-cache', (req, res) => {
+  if (opValidator) {
+    opValidator.clearCache();
+    console.log('OP validation cache cleared via API');
+    
+    res.json({
+      success: true,
+      message: 'OP validation cache cleared successfully.'
+    });
+  } else {
+    res.status(500).json({
+      success: false,
+      message: 'OP validator not initialized.'
+    });
+  }
+});
+
+/**
+ * Validate Trust Anchor URL configuration
+ * Implements Requirements: 9.1, 9.2, 9.3
+ * 
+ * @param {string} url - Trust Anchor URL to validate
+ * @returns {boolean} - True if valid, false otherwise
+ */
+function validateTrustAnchorUrl(url) {
+  if (!url) {
+    console.error('FATAL: TRUST_ANCHOR_URL is not configured');
+    console.error('Configuration Error Details:');
+    console.error('  - Environment variable TRUST_ANCHOR_URL is missing or empty');
+    console.error('  - This variable is required for OP trust chain validation');
+    console.error('  - Please set TRUST_ANCHOR_URL to a valid HTTPS URL');
+    console.error('  - Example: TRUST_ANCHOR_URL=https://trust-anchor.example.com');
+    return false;
+  }
+
+  // Validate URL format (must be HTTPS)
+  try {
+    const parsedUrl = new URL(url);
+    
+    if (parsedUrl.protocol !== 'https:') {
+      console.error('FATAL: TRUST_ANCHOR_URL must use HTTPS protocol');
+      console.error('Configuration Error Details:');
+      console.error(`  - Provided URL: ${url}`);
+      console.error(`  - Protocol: ${parsedUrl.protocol}`);
+      console.error('  - Required protocol: https:');
+      console.error('  - Security requirement: Trust Anchor URLs must use HTTPS for secure communication');
+      console.error('  - Please update TRUST_ANCHOR_URL to use HTTPS');
+      return false;
+    }
+
+    console.log('✓ Trust Anchor URL validation passed');
+    console.log(`  - URL: ${url}`);
+    console.log(`  - Protocol: ${parsedUrl.protocol}`);
+    console.log(`  - Host: ${parsedUrl.host}`);
+    
+    return true;
+  } catch (error) {
+    console.error('FATAL: TRUST_ANCHOR_URL has invalid URL format');
+    console.error('Configuration Error Details:');
+    console.error(`  - Provided value: ${url}`);
+    console.error(`  - Parse error: ${error.message}`);
+    console.error('  - A valid URL must include protocol, host, and optionally port and path');
+    console.error('  - Example: TRUST_ANCHOR_URL=https://trust-anchor.example.com');
+    return false;
+  }
+}
+
 // Initialize and start server
 async function startServer() {
   try {
     await initializeKeyPair();
+    
+    // Read Trust Anchor URL from environment variables
+    // Implements Requirements: 9.1, 9.2, 9.3
+    const trustAnchorUrl = process.env.TRUST_ANCHOR_URL;
+    
+    // Validate Trust Anchor URL configuration
+    if (!validateTrustAnchorUrl(trustAnchorUrl)) {
+      console.error('');
+      console.error('Server startup failed due to configuration error');
+      console.error('Please fix the TRUST_ANCHOR_URL configuration and restart the server');
+      process.exit(1);
+    }
+
+    // Initialize OP Trust Chain Validator
+    // Implements Requirements: 9.1, 9.4
+    console.log('Initializing OP Trust Chain Validator...');
+    
+    try {
+      opValidator = new OPTrustChainValidator({
+        trustAnchorUrl: trustAnchorUrl,
+        cacheExpirationMs: 3600000 // 1 hour
+      });
+      console.log('✓ OP Trust Chain Validator initialized successfully');
+    } catch (validatorError) {
+      console.error('FATAL: Failed to initialize OP Trust Chain Validator');
+      console.error('Initialization Error Details:');
+      console.error(`  - Error: ${validatorError.message}`);
+      console.error(`  - Trust Anchor URL: ${trustAnchorUrl}`);
+      console.error('  - This error prevents OP trust chain validation from functioning');
+      console.error('  - Please check the Trust Anchor URL and validator configuration');
+      throw validatorError;
+    }
     
     // Load persisted credentials if available
     loadPersistedCredentials();
@@ -609,10 +842,11 @@ async function startServer() {
       console.log(`- Entity ID: ${FEDERATION_CONFIG.entityId}`);
       console.log(`- Authorization Server: ${FEDERATION_CONFIG.authorizationServer}`);
       console.log(`- Redirect URI: ${FEDERATION_CONFIG.redirectUri}`);
-      console.log(`- Trust Anchor: ${FEDERATION_CONFIG.trustAnchorId}`);
+      console.log(`- Trust Anchor: ${trustAnchorUrl}`);
       console.log(`- Federation Registration Endpoint: ${FEDERATION_CONFIG.federationRegistrationEndpoint}`);
       console.log('- Key Pair: Generated');
       console.log(`- Client Registration: ${registeredClientSecret ? 'Loaded from storage' : 'Not registered'}`);
+      console.log('- OP Validation: Enabled');
       console.log('- Status: Ready');
     });
   } catch (error) {

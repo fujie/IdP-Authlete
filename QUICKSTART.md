@@ -45,13 +45,19 @@ cloudflared tunnel --url http://localhost:3010
 # 表示されたURLをメモ（例: https://abc.trycloudflare.com）
 ```
 
-**ターミナル2（Valid Client用）:**
+**ターミナル2（Authorization Server / OP用）:**
+```bash
+cloudflared tunnel --url http://localhost:3001
+# 表示されたURLをメモ（例: https://aaa.trycloudflare.com）
+```
+
+**ターミナル3（Valid Client用）:**
 ```bash
 cloudflared tunnel --url http://localhost:3006
 # 表示されたURLをメモ（例: https://xyz.trycloudflare.com）
 ```
 
-**ターミナル3（Invalid Client用）:**
+**ターミナル4（Invalid Client用）:**
 ```bash
 cloudflared tunnel --url http://localhost:3007
 # 表示されたURLをメモ（例: https://def.trycloudflare.com）
@@ -65,46 +71,58 @@ cloudflared tunnel --url http://localhost:3007
 
 # プロンプトに従ってURLを入力
 Trust Anchor URL: https://abc.trycloudflare.com
+Authorization Server (OP) URL: https://aaa.trycloudflare.com
 Valid Client URL: https://xyz.trycloudflare.com
 Invalid Client URL: https://def.trycloudflare.com
 ```
 
-### 5. Authlete設定
+### 5. Trust Anchor設定
 
-Authlete管理画面で以下を設定:
+Trust Anchor管理画面でOPエンティティを登録:
 
-1. **Service Settings** → **Federation**
-2. **Trust Anchor**: Trust AnchorのcloudflaredURLを入力
-3. **Save**をクリック
+1. http://localhost:3010/admin にアクセス
+2. **Add Entity**セクションで以下を入力:
+   - **Entity ID**: Authorization ServerのcloudflaredURL（例: https://aaa.trycloudflare.com）
+   - **Entity Type**: `openid_provider`を選択
+3. **Add Entity**をクリック
 
 ### 6. サーバーの起動
 
-**ターミナル4（Trust Anchor）:**
+**ターミナル5（Trust Anchor）:**
 ```bash
 cd trust-anchor && npm start
 ```
 
-**ターミナル5（Valid Client）:**
-```bash
-cd test-client-federation-valid && npm start
-```
-
-**ターミナル6（Invalid Client）:**
-```bash
-cd test-client-federation-invalid && npm start
-```
-
-**ターミナル7（Authorization Server）:**
+**ターミナル6（Authorization Server）:**
 ```bash
 npm start
 ```
 
+**ターミナル7（Valid Client）:**
+```bash
+cd test-client-federation-valid && npm start
+```
+
+**ターミナル8（Invalid Client）:**
+```bash
+cd test-client-federation-invalid && npm start
+```
+
 ## 動作確認
+
+### Trust AnchorへのOP登録
+
+1. Trust Anchor管理画面（http://localhost:3010/admin）にアクセス
+2. **Add Entity**セクションで以下を入力:
+   - **Entity ID**: Authorization ServerのcloudflaredURL
+   - **Entity Type**: `openid_provider`を選択
+3. **Add Entity**をクリック
+4. ✅ OPが登録されたことを確認
 
 ### 正常系テスト（Valid Client）
 
 1. http://localhost:3006 にアクセス
-2. Trust Anchor管理画面（http://localhost:3010/admin）でValid ClientのEntity IDを登録
+2. Trust Anchor管理画面でValid ClientのEntity IDを登録（Entity Type: `openid_relying_party`）
 3. "Start Federation Login"をクリック
 4. ✅ 登録成功 → 認可フロー開始
 

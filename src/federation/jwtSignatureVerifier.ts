@@ -171,27 +171,15 @@ export class JWTSignatureVerifier {
     for (let i = 0; i < trustChain.length; i++) {
       const statement = trustChain[i];
       
-      // For the first statement (leaf entity), we need to get the public key from the next statement
-      // For subsequent statements, we get the public key from the statement itself (self-signed)
+      // For self-signed entity configurations, verify using the entity's own public keys
+      // In a full OpenID Federation implementation, we would verify entity statements
+      // (issued by authorities) using the authority's public keys
       let publicKeys: JWKSet;
       let expectedIssuer: string | undefined;
 
-      if (i === 0 && trustChain.length > 1) {
-        // Leaf entity - verify using parent's public keys
-        const parentStatement = trustChain[i + 1];
-        if (!parentStatement.payload.jwks) {
-          allErrors.push(
-            ValidationUtils.createValidationError(
-              FEDERATION_CONSTANTS.ERRORS.INVALID_CLIENT_METADATA,
-              `Parent entity ${parentStatement.payload.iss} missing public keys`
-            )
-          );
-          continue;
-        }
-        publicKeys = parentStatement.payload.jwks;
-        expectedIssuer = parentStatement.payload.iss;
-      } else {
-        // Self-signed entity statement
+      // Check if this is a self-signed statement (iss === sub)
+      if (statement.payload.iss === statement.payload.sub) {
+        // Self-signed entity configuration - verify using entity's own keys
         if (!statement.payload.jwks) {
           allErrors.push(
             ValidationUtils.createValidationError(
@@ -202,6 +190,26 @@ export class JWTSignatureVerifier {
           continue;
         }
         publicKeys = statement.payload.jwks;
+        expectedIssuer = statement.payload.iss;
+      } else {
+        // Entity statement issued by authority - verify using authority's keys
+        // Find the authority's entity configuration in the trust chain
+        // Authority's entity configuration has iss === sub === authority_id
+        const authorityId = statement.payload.iss;
+        const authorityStatement = trustChain.find(s => 
+          s.payload.iss === authorityId && s.payload.sub === authorityId
+        );
+        
+        if (!authorityStatement || !authorityStatement.payload.jwks) {
+          allErrors.push(
+            ValidationUtils.createValidationError(
+              FEDERATION_CONSTANTS.ERRORS.INVALID_CLIENT_METADATA,
+              `Authority ${authorityId} entity configuration not found in trust chain or missing public keys`
+            )
+          );
+          continue;
+        }
+        publicKeys = authorityStatement.payload.jwks;
         expectedIssuer = statement.payload.iss;
       }
 

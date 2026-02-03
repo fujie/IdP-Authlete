@@ -202,6 +202,66 @@
             color: #666;
             font-size: 14px;
         }
+        .entity-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 10px;
+            text-transform: uppercase;
+        }
+        .badge-rp {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        .badge-op {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+        .entity-info {
+            display: flex;
+            align-items: center;
+            flex: 1;
+        }
+        .entity-details {
+            display: flex;
+            flex-direction: column;
+        }
+        .entity-type-label {
+            font-size: 11px;
+            color: #999;
+            margin-top: 2px;
+        }
+        .filter-section {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .filter-btn {
+            padding: 8px 16px;
+            border: 2px solid #667eea;
+            background: white;
+            color: #667eea;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        .filter-btn:hover {
+            background: #f0f2ff;
+        }
+        .filter-btn.active {
+            background: #667eea;
+            color: white;
+        }
+        .filter-label {
+            font-weight: 600;
+            color: #333;
+            margin-right: 10px;
+        }
     </style>
 </head>
 <body>
@@ -215,6 +275,14 @@
             <div class="stat-card">
                 <div class="stat-value"><%= entities.length %></div>
                 <div class="stat-label">Registered Entities</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="rpCount">0</div>
+                <div class="stat-label">Relying Parties</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="opCount">0</div>
+                <div class="stat-label">OpenID Providers</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">✓</div>
@@ -241,6 +309,19 @@
         <div class="entities-section">
             <h2>Subordinate Entities</h2>
             
+            <div class="filter-section">
+                <span class="filter-label">Filter by Type:</span>
+                <button class="filter-btn active" onclick="filterEntities('all')">
+                    All (<span id="allCount">0</span>)
+                </button>
+                <button class="filter-btn" onclick="filterEntities('openid_relying_party')">
+                    Relying Parties (<span id="rpFilterCount">0</span>)
+                </button>
+                <button class="filter-btn" onclick="filterEntities('openid_provider')">
+                    OpenID Providers (<span id="opFilterCount">0</span>)
+                </button>
+            </div>
+            
             <% if (entities.length === 0) { %>
                 <div class="empty-state">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -251,13 +332,25 @@
             <% } else { %>
                 <ul class="entity-list">
                     <% entities.forEach(function(entity) { %>
-                        <li class="entity-item">
-                            <span class="entity-url"><%= entity %></span>
+                        <li class="entity-item" data-entity-type="<%= entity.entityType || 'openid_relying_party' %>">
+                            <div class="entity-info">
+                                <% if (entity.entityType === 'openid_provider') { %>
+                                    <span class="entity-badge badge-op">OP</span>
+                                <% } else { %>
+                                    <span class="entity-badge badge-rp">RP</span>
+                                <% } %>
+                                <div class="entity-details">
+                                    <span class="entity-url"><%= entity.entityId || entity %></span>
+                                    <span class="entity-type-label">
+                                        <%= entity.entityType === 'openid_provider' ? 'OpenID Provider' : 'Relying Party' %>
+                                    </span>
+                                </div>
+                            </div>
                             <div class="entity-actions">
-                                <button onclick="testEntity('<%= entity %>')" class="btn btn-secondary">
+                                <button onclick="testEntity('<%= entity.entityId || entity %>')" class="btn btn-secondary">
                                     🧪 Test
                                 </button>
-                                <button onclick="removeEntity('<%= entity %>')" class="btn btn-danger">
+                                <button onclick="removeEntity('<%= entity.entityId || entity %>')" class="btn btn-danger">
                                     🗑️ Remove
                                 </button>
                             </div>
@@ -278,6 +371,19 @@
                             placeholder="https://example.com" 
                             required
                         >
+                    </div>
+                    <div class="form-group">
+                        <label for="entityType">Entity Type</label>
+                        <select 
+                            id="entityType" 
+                            name="entityType" 
+                            required
+                            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;"
+                        >
+                            <option value="">Select entity type...</option>
+                            <option value="openid_relying_party">Relying Party (RP)</option>
+                            <option value="openid_provider">OpenID Provider (OP)</option>
+                        </select>
                     </div>
                     <button type="submit" class="btn btn-primary">
                         ➕ Add Entity
@@ -300,16 +406,53 @@
     </div>
 
     <script>
+        // Initialize counts on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            updateCounts();
+        });
+
+        function updateCounts() {
+            const allItems = document.querySelectorAll('.entity-item');
+            const rpItems = document.querySelectorAll('.entity-item[data-entity-type="openid_relying_party"]');
+            const opItems = document.querySelectorAll('.entity-item[data-entity-type="openid_provider"]');
+            
+            document.getElementById('allCount').textContent = allItems.length;
+            document.getElementById('rpFilterCount').textContent = rpItems.length;
+            document.getElementById('opFilterCount').textContent = opItems.length;
+            document.getElementById('rpCount').textContent = rpItems.length;
+            document.getElementById('opCount').textContent = opItems.length;
+        }
+
+        function filterEntities(type) {
+            const allItems = document.querySelectorAll('.entity-item');
+            const filterButtons = document.querySelectorAll('.filter-btn');
+            
+            // Update active button state
+            filterButtons.forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Filter entities
+            allItems.forEach(item => {
+                if (type === 'all') {
+                    item.style.display = 'flex';
+                } else {
+                    const entityType = item.getAttribute('data-entity-type');
+                    item.style.display = entityType === type ? 'flex' : 'none';
+                }
+            });
+        }
+
         function addEntity(event) {
             event.preventDefault();
             const entityId = document.getElementById('entityId').value;
+            const entityType = document.getElementById('entityType').value;
             
             fetch('/admin/entities', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ entityId })
+                body: JSON.stringify({ entityId, entityType })
             })
             .then(response => response.json())
             .then(data => {

@@ -185,6 +185,9 @@
             <a href="/health" class="button secondary" target="_blank">
                 ❤️ Health Check
             </a>
+            <button onclick="clearOPCache()" class="button secondary">
+                🔄 Clear OP Cache
+            </button>
             <% if (hasClientSecret) { %>
                 <button onclick="clearRegistration()" class="button danger">
                     🗑️ Clear Registration
@@ -194,6 +197,23 @@
     </div>
 
     <script>
+        function clearOPCache() {
+            if (confirm('Clear the OP validation cache?\n\nThis will force re-validation of the OP trust chain on the next login attempt.')) {
+                fetch('/clear-cache')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('✅ OP cache cleared successfully!');
+                        } else {
+                            alert('❌ Failed to clear cache: ' + (data.message || 'Unknown error'));
+                        }
+                    })
+                    .catch(error => {
+                        alert('❌ Error clearing cache: ' + error.message);
+                    });
+            }
+        }
+
         function clearRegistration() {
             if (confirm('Are you sure you want to clear the client registration?\n\nThis will:\n- Delete the stored client credentials\n- Require re-registration on next login\n\n⚠️ IMPORTANT: This will NOT delete the client from Authlete.\nIf you try to login again, you will get an error.\nYou must delete the client from Authlete console first.')) {
                 fetch('/clear-registration')
