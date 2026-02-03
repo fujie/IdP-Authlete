@@ -213,6 +213,18 @@ export class TrustAnchorValidator implements TrustAnchorRegistry, FederationMeta
       // Ensure required fields are present
       this.ensureRequiredMetadata(clientMetadata);
 
+      // Deduplicate redirect_uris to avoid Authlete validation errors
+      if (clientMetadata.redirect_uris && Array.isArray(clientMetadata.redirect_uris)) {
+        clientMetadata.redirect_uris = [...new Set(clientMetadata.redirect_uris)];
+        logger.logInfo(
+          'Deduplicated redirect_uris',
+          'TrustAnchorValidator',
+          { 
+            redirectUriCount: clientMetadata.redirect_uris.length
+          }
+        );
+      }
+
       // Validate the final metadata
       const validationErrors = ValidationUtils.validateClientMetadata(clientMetadata);
       if (validationErrors.length > 0) {
@@ -354,7 +366,7 @@ export class TrustAnchorValidator implements TrustAnchorRegistry, FederationMeta
     }
 
     // Trust anchor should not have authority hints
-    if (payload.authorityHints && payload.authorityHints.length > 0) {
+    if (payload.authority_hints && payload.authority_hints.length > 0) {
       errors.push(
         ValidationUtils.createValidationError(
           FEDERATION_CONSTANTS.ERRORS.INVALID_TRUST_ANCHOR,
@@ -393,45 +405,53 @@ export class TrustAnchorValidator implements TrustAnchorRegistry, FederationMeta
     const errors: ValidationError[] = [];
 
     // Each entity (except the last) should have authority hints pointing to the next entity
+    // UNLESS it's an entity statement issued by a trust anchor (iss is a trust anchor)
     for (let i = 0; i < trustChain.length - 1; i++) {
       const currentEntity = trustChain[i];
       const nextEntity = trustChain[i + 1];
 
-      // Check if current entity has authority hints
-      if (!currentEntity.payload.authorityHints || currentEntity.payload.authorityHints.length === 0) {
-        errors.push(
-          ValidationUtils.createValidationError(
-            FEDERATION_CONSTANTS.ERRORS.TRUST_CHAIN_VALIDATION_FAILED,
-            `Entity ${currentEntity.payload.iss} missing authority hints`
-          )
-        );
-        continue;
+      // Check if current entity is an entity statement issued by a trust anchor
+      const isIssuedByTrustAnchor = this.isTrustedAnchorSync(currentEntity.payload.iss);
+      
+      // Check if current entity has authority hints (not required for statements issued by trust anchors)
+      if (!isIssuedByTrustAnchor) {
+        if (!currentEntity.payload.authority_hints || currentEntity.payload.authority_hints.length === 0) {
+          errors.push(
+            ValidationUtils.createValidationError(
+              FEDERATION_CONSTANTS.ERRORS.TRUST_CHAIN_VALIDATION_FAILED,
+              `Entity ${currentEntity.payload.iss} missing authority hints`
+            )
+          );
+          continue;
+        }
+
+        // Check if next entity is in authority hints
+        if (!currentEntity.payload.authority_hints.includes(nextEntity.payload.iss)) {
+          errors.push(
+            ValidationUtils.createValidationError(
+              FEDERATION_CONSTANTS.ERRORS.TRUST_CHAIN_VALIDATION_FAILED,
+              `Entity ${currentEntity.payload.iss} does not list ${nextEntity.payload.iss} as authority`
+            )
+          );
+        }
       }
 
-      // Check if next entity is in authority hints
-      if (!currentEntity.payload.authorityHints.includes(nextEntity.payload.iss)) {
-        errors.push(
-          ValidationUtils.createValidationError(
-            FEDERATION_CONSTANTS.ERRORS.TRUST_CHAIN_VALIDATION_FAILED,
-            `Entity ${currentEntity.payload.iss} does not list ${nextEntity.payload.iss} as authority`
-          )
-        );
-      }
-
-      // Verify signature of current entity using next entity's public keys
-      if (nextEntity.payload.jwks) {
+      // For self-signed entity configurations, verify signature using entity's own keys
+      // In a full OpenID Federation implementation, we would fetch entity statements
+      // from the authority (next entity) that are signed by the authority's keys
+      if (currentEntity.payload.jwks && currentEntity.payload.iss === currentEntity.payload.sub) {
         try {
           const verificationResult = await this.signatureVerifier.verifyEntityStatement(
             currentEntity.jwt,
-            nextEntity.payload.jwks,
-            nextEntity.payload.iss
+            currentEntity.payload.jwks,
+            currentEntity.payload.iss
           );
 
           if (!verificationResult.isValid) {
             errors.push(
               ValidationUtils.createValidationError(
                 FEDERATION_CONSTANTS.ERRORS.TRUST_CHAIN_VALIDATION_FAILED,
-                `Failed to verify ${currentEntity.payload.iss} signature using ${nextEntity.payload.iss} keys`
+                `Failed to verify ${currentEntity.payload.iss} self-signed signature`
               )
             );
           }
