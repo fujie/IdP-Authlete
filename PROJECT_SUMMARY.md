@@ -17,6 +17,13 @@ OpenID Federation 1.0仕様に基づいた動的クライアント登録機能�
 - Authleteへのクライアント自動登録
 - Request Object（JWT）処理
 
+✅ **マルチOP選択機能**
+- 複数のOPから選択可能
+- OP単位のクライアント登録管理
+- OP Discovery（メタデータ取得とキャッシング）
+- Entity ID検証
+- OP選択の永続化
+
 ✅ **Trust Anchor実装**
 - エンティティの登録・管理
 - Entity Statementの発行
@@ -74,11 +81,24 @@ OpenID Federation 1.0仕様に基づいた動的クライアント登録機能�
 │       └── admin.ejs                       # 管理UI
 ├── test-client-federation-valid/           # 正常系テストクライアント
 │   ├── server.js                           # クライアントサーバー
+│   ├── lib/
+│   │   ├── opDiscoveryService.js           # OP Discovery（メタデータ取得）
+│   │   ├── multiOPCredentialsManager.js    # マルチOP認証情報管理
+│   │   ├── entityIdValidator.js            # Entity ID検証
+│   │   └── opTrustChainValidator.js        # OP Trust Chain検証
 │   └── views/                              # UI
 ├── test-client-federation-invalid/         # 異常系テストクライアント
 │   ├── server.js                           # クライアントサーバー
 │   └── views/                              # UI
 └── .kiro/specs/federation-dynamic-registration/ # 仕様書
+    ├── requirements.md                     # 要件定義
+    ├── design.md                           # 設計書
+    └── tasks.md                            # タスクリスト
+└── .kiro/specs/rp-multi-op-selection/      # マルチOP選択機能仕様書
+    ├── requirements.md                     # 要件定義
+    ├── design.md                           # 設計書
+    └── tasks.md                            # タスクリスト
+└── .kiro/specs/rp-op-trust-validation/     # OP Trust検証機能仕様書
     ├── requirements.md                     # 要件定義
     ├── design.md                           # 設計書
     └── tasks.md                            # タスクリスト
@@ -93,15 +113,22 @@ OpenID Federation 1.0仕様に基づいた動的クライアント登録機能�
 | **README.md** | プロジェクト概要とクイックスタート |
 | **QUICKSTART.md** | 5分でセットアップする手順 |
 | **FEDERATION_README.md** | 完全な実装ガイド |
+| **OP2_SETUP.md** | OP2（2つ目のOP）のセットアップガイド |
 
 ### 開発者向け
 
 | ドキュメント | 説明 |
 |------------|------|
 | **ARCHITECTURE_JP.md** | アーキテクチャ詳細 |
-| **.kiro/specs/federation-dynamic-registration/requirements.md** | 要件定義 |
-| **.kiro/specs/federation-dynamic-registration/design.md** | 設計書 |
-| **.kiro/specs/federation-dynamic-registration/tasks.md** | タスクリスト |
+| **.kiro/specs/federation-dynamic-registration/requirements.md** | Federation動的登録の要件定義 |
+| **.kiro/specs/federation-dynamic-registration/design.md** | Federation動的登録の設計書 |
+| **.kiro/specs/federation-dynamic-registration/tasks.md** | Federation動的登録のタスクリスト |
+| **.kiro/specs/rp-multi-op-selection/requirements.md** | マルチOP選択機能の要件定義 |
+| **.kiro/specs/rp-multi-op-selection/design.md** | マルチOP選択機能の設計書 |
+| **.kiro/specs/rp-multi-op-selection/tasks.md** | マルチOP選択機能のタスクリスト |
+| **.kiro/specs/rp-op-trust-validation/requirements.md** | OP Trust検証機能の要件定義 |
+| **.kiro/specs/rp-op-trust-validation/design.md** | OP Trust検証機能の設計書 |
+| **.kiro/specs/rp-op-trust-validation/tasks.md** | OP Trust検証機能のタスクリスト |
 
 ## テスト結果
 
@@ -275,6 +302,11 @@ MIT License
 
 ---
 
-**最終更新**: 2026年1月29日  
-**バージョン**: 1.0.0  
+**最終更新**: 2026年2月4日  
+**バージョン**: 1.1.0  
 **ステータス**: 本番環境対応可能
+
+**新機能（v1.1.0）**:
+- マルチOP選択機能
+- OP Trust Chain検証
+- OP2サポート（複数OPでのテスト環境）

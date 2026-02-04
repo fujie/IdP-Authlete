@@ -45,19 +45,25 @@ cloudflared tunnel --url http://localhost:3010
 # 表示されたURLをメモ（例: https://abc.trycloudflare.com）
 ```
 
-**ターミナル2（Authorization Server / OP用）:**
+**ターミナル2（Authorization Server / OP1用）:**
 ```bash
 cloudflared tunnel --url http://localhost:3001
 # 表示されたURLをメモ（例: https://aaa.trycloudflare.com）
 ```
 
-**ターミナル3（Valid Client用）:**
+**ターミナル3（Authorization Server / OP2用）:** *(オプション - マルチOP機能をテストする場合)*
+```bash
+cloudflared tunnel --url http://localhost:3002
+# 表示されたURLをメモ（例: https://bbb.trycloudflare.com）
+```
+
+**ターミナル4（Valid Client用）:**
 ```bash
 cloudflared tunnel --url http://localhost:3006
 # 表示されたURLをメモ（例: https://xyz.trycloudflare.com）
 ```
 
-**ターミナル4（Invalid Client用）:**
+**ターミナル5（Invalid Client用）:**
 ```bash
 cloudflared tunnel --url http://localhost:3007
 # 表示されたURLをメモ（例: https://def.trycloudflare.com）
@@ -80,30 +86,52 @@ Invalid Client URL: https://def.trycloudflare.com
 
 Trust Anchor管理画面でOPエンティティを登録:
 
+#### OP1の登録
+
 1. http://localhost:3010/admin にアクセス
 2. **Add Entity**セクションで以下を入力:
-   - **Entity ID**: Authorization ServerのcloudflaredURL（例: https://aaa.trycloudflare.com）
+   - **Entity ID**: OP1のcloudflaredURL（例: https://aaa.trycloudflare.com）
    - **Entity Type**: `openid_provider`を選択
 3. **Add Entity**をクリック
 
+#### OP2の登録（オプション - マルチOP機能をテストする場合）
+
+1. 同じ管理画面で**Add Entity**セクションに以下を入力:
+   - **Entity ID**: OP2のcloudflaredURL（例: https://bbb.trycloudflare.com）
+   - **Entity Type**: `openid_provider`を選択
+2. **Add Entity**をクリック
+
+**注意**: OP2を使用する場合は、別のAuthlete Service IDとアクセストークンが必要です。詳細は`OP2_SETUP.md`を参照してください。
+
 ### 6. サーバーの起動
 
-**ターミナル5（Trust Anchor）:**
+**ターミナル6（Trust Anchor）:**
 ```bash
 cd trust-anchor && npm start
 ```
 
-**ターミナル6（Authorization Server）:**
+**ターミナル7（Authorization Server / OP1）:**
 ```bash
 npm start
 ```
 
-**ターミナル7（Valid Client）:**
+**ターミナル8（Authorization Server / OP2）:** *(オプション)*
+```bash
+# OP2を起動する場合
+PORT=3002 \
+AUTHLETE_SERVICE_ID=3125677441 \
+AUTHLETE_SERVICE_ACCESS_TOKEN=3nv1XyMB-ahEjdWqsxEdD3rHy2sfaJ_JT5nZ-qPFYSs \
+OP_ENTITY_ID=https://op2.diddc.site \
+FEDERATION_TRUST_ANCHORS=https://ta.diddc.site \
+npm start
+```
+
+**ターミナル9（Valid Client）:**
 ```bash
 cd test-client-federation-valid && npm start
 ```
 
-**ターミナル8（Invalid Client）:**
+**ターミナル10（Invalid Client）:**
 ```bash
 cd test-client-federation-invalid && npm start
 ```
@@ -161,7 +189,9 @@ curl http://localhost:3007/clear-registration
 
 詳細なドキュメント:
 - `FEDERATION_README.md` - 完全な実装ガイド
+- `OP2_SETUP.md` - OP2（2つ目のOP）のセットアップガイド
 - `.kiro/specs/federation-dynamic-registration/` - 仕様書
+- `.kiro/specs/rp-multi-op-selection/` - マルチOP選択機能の仕様書
 
 ## サポート
 
