@@ -79,7 +79,7 @@ router.get('/.well-known/openid-configuration', (req, res) => {
       'S256'
     ],
     // OpenID Federation 1.0 specific claims
-    federation_registration_endpoint: `${baseUrl}/federation/register`,
+    federation_registration_endpoint: `${baseUrl}/federation/registration`,
     organization_name: 'OpenID Connect Authorization Server with Federation Support'
   };
 

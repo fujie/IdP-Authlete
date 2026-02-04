@@ -2,6 +2,7 @@
   "name": "openid-federation-test-client-valid",
   "version": "1.0.0",
   "description": "Valid OpenID Federation Test Client for Dynamic Registration",
+  "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

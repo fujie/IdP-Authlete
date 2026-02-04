@@ -15,8 +15,8 @@
  * Implements Requirements: 1.1, 1.2, 9.1, 9.4
  */
 
-const { TrustChainResolver } = require('../../dist/federation/trustChainResolver');
-const { TrustAnchorValidator } = require('../../dist/federation/trustAnchorValidator');
+import { TrustChainResolver } from '../../dist/federation/trustChainResolver.js';
+import { TrustAnchorValidator } from '../../dist/federation/trustAnchorValidator.js';
 
 /**
  * Error codes for OP trust chain validation
@@ -444,4 +444,4 @@ class OPTrustChainValidator {
   }
 }
 
-module.exports = { OPTrustChainValidator, ERROR_CODES };
+export { OPTrustChainValidator, ERROR_CODES };

@@ -112,13 +112,6 @@
         <div class="status">
             <h3>Client Status</h3>
             <p><strong>Entity ID:</strong> <%= config.entityId %></p>
-            <p><strong>Registration Status:</strong> 
-                <% if (hasClientSecret) { %>
-                    ✅ Registered with credentials
-                <% } else { %>
-                    ⚠️ Not registered or credentials missing
-                <% } %>
-            </p>
             <p><strong>Trust Anchor:</strong> <%= config.trustAnchorId %></p>
         </div>
 
@@ -127,6 +120,11 @@
                 <h3>✅ Authentication Successful</h3>
                 <p><strong>User:</strong> <%= user.name %></p>
                 <p><strong>User ID:</strong> <%= user.id %></p>
+                <% if (selectedOP && selectedOP.entityId) { %>
+                    <p><strong>Authenticated with OP:</strong> <%= selectedOP.entityId %></p>
+                <% } else if (config.authorizationServer) { %>
+                    <p><strong>Authenticated with OP:</strong> <%= config.authorizationServer %></p>
+                <% } %>
                 <p><strong>Status:</strong> Authenticated via OpenID Federation Dynamic Registration</p>
             </div>
 
@@ -146,6 +144,77 @@
 
             <a href="/logout" class="button">Logout</a>
         <% } else { %>
+            <!-- OP Selection Section -->
+            <div class="op-selection" style="background: #f0f8ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <h3>🔍 Select OpenID Provider</h3>
+                
+                <% if (defaultOP) { %>
+                    <div style="background: #fff3cd; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+                        <strong>Default OP:</strong> <%= defaultOP %>
+                        <p style="margin: 5px 0 0 0; font-size: 14px;">This OP is configured via AUTHORIZATION_SERVER environment variable</p>
+                    </div>
+                <% } %>
+
+                <% if (selectedOP) { %>
+                    <div class="status" style="background: #e8f5e9; border-left-color: #4CAF50;">
+                        <h4 style="margin-top: 0;">✅ OP Selected</h4>
+                        <p><strong>Entity ID:</strong> <%= selectedOP.entityId %></p>
+                        <% if (selectedOP.metadata) { %>
+                            <p><strong>Issuer:</strong> <%= selectedOP.metadata.issuer %></p>
+                            <p><strong>Authorization Endpoint:</strong> <%= selectedOP.metadata.authorization_endpoint %></p>
+                        <% } %>
+                        <% if (selectedOP.trustValidation) { %>
+                            <p><strong>Trust Validation:</strong> 
+                                <% if (selectedOP.trustValidation.isValid) { %>
+                                    ✅ Valid (Trust Anchor: <%= selectedOP.trustValidation.trustAnchor %>)
+                                <% } else { %>
+                                    ❌ Invalid
+                                <% } %>
+                            </p>
+                        <% } %>
+                        <p><strong>Registration Status:</strong> 
+                            <% if (hasClientSecret) { %>
+                                ✅ Registered with this OP
+                            <% } else { %>
+                                ⚠️ Not registered (will register on first login)
+                            <% } %>
+                        </p>
+                        <% if (selectedOP.isDefault) { %>
+                            <p style="font-size: 14px; color: #666;">This is the default OP from configuration</p>
+                        <% } %>
+                    </div>
+                <% } else { %>
+                    <p>Enter the entity ID of the OpenID Provider you want to authenticate with:</p>
+                <% } %>
+
+                <div style="margin: 20px 0;">
+                    <form id="opSelectionForm" style="display: flex; gap: 10px; align-items: flex-start;">
+                        <div style="flex: 1;">
+                            <input 
+                                type="text" 
+                                id="opEntityId" 
+                                name="entity_id" 
+                                placeholder="https://op.example.com"
+                                style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 5px; font-size: 14px;"
+                                required
+                            />
+                            <div id="validationFeedback" style="margin-top: 5px; font-size: 14px;"></div>
+                        </div>
+                        <button type="submit" class="button" style="margin: 0;">
+                            Select OP
+                        </button>
+                    </form>
+                </div>
+
+                <div id="opSelectionResult" style="margin-top: 15px;"></div>
+
+                <!-- Previously Used OPs -->
+                <div id="previousOPs" style="margin-top: 20px;">
+                    <h4>Previously Used OPs</h4>
+                    <div id="previousOPsList"></div>
+                </div>
+            </div>
+
             <div class="config">
                 <h3>Federation Configuration</h3>
                 <div class="config-item"><strong>Entity ID:</strong> <%= config.entityId %></div>
@@ -157,9 +226,19 @@
             </div>
 
             <div style="text-align: center; margin: 30px 0;">
-                <a href="/federation-login" class="button">
-                    🔐 Login with OpenID Federation
-                </a>
+                <% if (selectedOP) { %>
+                    <a href="/federation-login" class="button">
+                        🔐 Login with Selected OP
+                    </a>
+                <% } else if (defaultOP) { %>
+                    <a href="/federation-login" class="button">
+                        🔐 Login with Default OP
+                    </a>
+                <% } else { %>
+                    <button class="button" disabled style="opacity: 0.5; cursor: not-allowed;">
+                        🔐 Select an OP to Login
+                    </button>
+                <% } %>
                 <br><br>
                 <a href="/test-registration" class="button secondary">
                     🧪 Test Dynamic Registration
@@ -169,10 +248,11 @@
             <div style="margin-top: 30px; padding: 15px; background: #f0f8f0; border-radius: 5px;">
                 <h4>How it works:</h4>
                 <ol>
-                    <li>Click "Login with OpenID Federation" to start the flow</li>
-                    <li>The client will perform dynamic registration with the authorization server</li>
-                    <li>Since this client's entity ID is registered in the trust anchor, registration should succeed</li>
-                    <li>You'll be redirected to the authorization server for authentication</li>
+                    <li>Select an OpenID Provider by entering its entity ID</li>
+                    <li>The system will discover the OP's metadata and validate its trust chain</li>
+                    <li>Click "Login with Selected OP" to start the authentication flow</li>
+                    <li>The client will perform dynamic registration with the selected OP</li>
+                    <li>You'll be redirected to the OP for authentication</li>
                     <li>After successful authentication, you'll be redirected back here with tokens</li>
                 </ol>
             </div>
@@ -190,13 +270,155 @@
             </button>
             <% if (hasClientSecret) { %>
                 <button onclick="clearRegistration()" class="button danger">
-                    🗑️ Clear Registration
+                    🗑️ Clear Client Registration
                 </button>
             <% } %>
         </div>
     </div>
 
     <script>
+        // Load previously used OPs on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadPreviousOPs();
+        });
+
+        // OP Selection Form Handler
+        document.getElementById('opSelectionForm')?.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const entityId = document.getElementById('opEntityId').value.trim();
+            const resultDiv = document.getElementById('opSelectionResult');
+            const feedbackDiv = document.getElementById('validationFeedback');
+            
+            // Clear previous results
+            resultDiv.innerHTML = '';
+            feedbackDiv.innerHTML = '';
+            
+            // Show loading
+            resultDiv.innerHTML = '<p style="color: #2196F3;">🔄 Discovering OP and validating trust chain...</p>';
+            
+            try {
+                const response = await fetch('/select-op', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ entity_id: entityId })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <div style="background: #e8f5e9; padding: 15px; border-radius: 5px; border-left: 4px solid #4CAF50;">
+                            <h4 style="margin-top: 0; color: #2e7d32;">✅ OP Selected Successfully</h4>
+                            <p><strong>Entity ID:</strong> ${data.op.entityId}</p>
+                            <p><strong>Issuer:</strong> ${data.op.metadata.issuer}</p>
+                            <p><strong>Trust Validation:</strong> ${data.op.trustValidation.cached ? '✅ Valid (cached)' : '✅ Valid'}</p>
+                            <p style="margin-bottom: 0;"><a href="/federation-login" class="button" style="margin-top: 10px;">🔐 Login with this OP</a></p>
+                        </div>
+                    `;
+                    
+                    // Reload page to show selected OP
+                    setTimeout(() => window.location.reload(), 1500);
+                } else {
+                    let errorMessage = data.message || 'Unknown error';
+                    let errorDetails = '';
+                    
+                    if (data.errors && data.errors.length > 0) {
+                        errorDetails = '<ul style="margin: 10px 0; padding-left: 20px;">';
+                        data.errors.forEach(err => {
+                            errorDetails += `<li>${err.message || err.code}</li>`;
+                        });
+                        errorDetails += '</ul>';
+                    }
+                    
+                    resultDiv.innerHTML = `
+                        <div style="background: #ffebee; padding: 15px; border-radius: 5px; border-left: 4px solid #f44336;">
+                            <h4 style="margin-top: 0; color: #c62828;">❌ ${data.error}</h4>
+                            <p>${errorMessage}</p>
+                            ${errorDetails}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div style="background: #ffebee; padding: 15px; border-radius: 5px; border-left: 4px solid #f44336;">
+                        <h4 style="margin-top: 0; color: #c62828;">❌ Error</h4>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        });
+
+        // Load previously used OPs
+        async function loadPreviousOPs() {
+            const listDiv = document.getElementById('previousOPsList');
+            if (!listDiv) return;
+            
+            try {
+                const response = await fetch('/list-ops');
+                const data = await response.json();
+                
+                if (data.success && data.ops.length > 0) {
+                    listDiv.innerHTML = data.ops.map(op => `
+                        <div style="background: #f9f9f9; padding: 10px; margin: 5px 0; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+                            <div style="flex: 1;">
+                                <span style="font-family: monospace; font-size: 14px;">${op.entityId}</span>
+                                <span style="margin-left: 10px; font-size: 12px; color: #4CAF50;">✅ Registered</span>
+                            </div>
+                            <div>
+                                <button onclick="selectOP('${op.entityId}')" class="button" style="padding: 6px 12px; font-size: 14px; margin: 0 5px;">
+                                    Select
+                                </button>
+                                <button onclick="clearOPCredentials('${op.entityId}')" class="button danger" style="padding: 6px 12px; font-size: 14px; margin: 0;">
+                                    Clear
+                                </button>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    listDiv.innerHTML = '<p style="color: #666; font-style: italic;">No previously used OPs</p>';
+                }
+            } catch (error) {
+                listDiv.innerHTML = '<p style="color: #f44336;">Error loading OPs</p>';
+            }
+        }
+
+        // Select OP from previous list
+        function selectOP(entityId) {
+            document.getElementById('opEntityId').value = entityId;
+            document.getElementById('opSelectionForm').dispatchEvent(new Event('submit'));
+        }
+
+        // Clear OP credentials
+        async function clearOPCredentials(entityId) {
+            if (!confirm(`Clear credentials for ${entityId}?`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/clear-op', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ entity_id: entityId })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('✅ Credentials cleared successfully!');
+                    loadPreviousOPs();
+                } else {
+                    alert('❌ Failed to clear credentials: ' + (data.message || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('❌ Error: ' + error.message);
+            }
+        }
+
         function clearOPCache() {
             if (confirm('Clear the OP validation cache?\n\nThis will force re-validation of the OP trust chain on the next login attempt.')) {
                 fetch('/clear-cache')
@@ -215,12 +437,12 @@
         }
 
         function clearRegistration() {
-            if (confirm('Are you sure you want to clear the client registration?\n\nThis will:\n- Delete the stored client credentials\n- Require re-registration on next login\n\n⚠️ IMPORTANT: This will NOT delete the client from Authlete.\nIf you try to login again, you will get an error.\nYou must delete the client from Authlete console first.')) {
+            if (confirm('Are you sure you want to clear ALL client registrations?\n\nThis will:\n- Delete ALL stored client credentials for all OPs\n- Require re-registration on next login\n\n⚠️ IMPORTANT: This will NOT delete the clients from Authlete.\nIf you try to login again, you may get an error.\nYou must delete the clients from Authlete console first.')) {
                 fetch('/clear-registration')
                     .then(response => response.json())
                     .then(data => {
                         if (data.success) {
-                            alert('✅ Registration cleared successfully!\n\n⚠️ IMPORTANT:\nBefore logging in again, please delete the client from Authlete console.\nEntity ID: <%= config.entityId %>');
+                            alert('✅ All registrations cleared successfully!\n\n⚠️ IMPORTANT:\nBefore logging in again, please delete the clients from Authlete console.\nEntity ID: <%= config.entityId %>');
                             window.location.reload();
                         } else {
                             alert('❌ Failed to clear registration: ' + (data.message || 'Unknown error'));
