@@ -215,13 +215,13 @@ class MultiOPCredentialsManager {
 **Storage Format** (`.op-credentials.json`):
 ```json
 {
-  "rpEntityId": "https://rp-test.diddc.site",
+  "rpEntityId": "https://rp-test.example.com",
   "ops": {
-    "https://op.diddc.site": {
+    "https://op.example.com": {
       "clientSecret": "secret123...",
       "registeredAt": "2026-01-29T12:00:00.000Z"
     },
-    "https://op2.diddc.site": {
+    "https://op2.example.com": {
       "clientSecret": "secret456...",
       "registeredAt": "2026-01-29T13:00:00.000Z"
     }
@@ -639,16 +639,16 @@ When upgrading from single-OP to multi-OP:
    ```javascript
    // Old format
    {
-     "entityId": "https://rp-test.diddc.site",
+     "entityId": "https://rp-test.example.com",
      "clientSecret": "secret123",
      "registeredAt": "2026-01-29T12:00:00.000Z"
    }
    
    // New format
    {
-     "rpEntityId": "https://rp-test.diddc.site",
+     "rpEntityId": "https://rp-test.example.com",
      "ops": {
-       "https://op.diddc.site": {
+       "https://op.example.com": {
          "clientSecret": "secret123",
          "registeredAt": "2026-01-29T12:00:00.000Z"
        }

@@ -9,8 +9,8 @@
 OP2用の環境変数ファイルを作成：
 - Authlete Service ID: [OP2_SERVICE_ID]
 - Port: 3002
-- Entity ID: https://op2.diddc.site
-- Trust Anchor: https://ta.diddc.site
+- Entity ID: https://op2.example.com
+- Trust Anchor: https://ta.example.com
 
 ### 2. マルチOP選択機能の実装
 
@@ -55,7 +55,7 @@ OP2用の環境変数ファイルを作成：
 ### 3. Trust AnchorへのOP2登録
 
 Trust Anchorの設定を更新：
-- OP2のEntity ID（https://op2.diddc.site）を登録
+- OP2のEntity ID（https://op2.example.com）を登録
 - Entity Type: `openid_provider`
 
 ### 4. ドキュメントの作成・更新
@@ -99,9 +99,9 @@ Trust Anchorの設定を更新：
 
 | サーバー | ポート | Entity ID | Authlete Service ID |
 |---------|--------|-----------|---------------------|
-| Trust Anchor | 3010 | https://ta.diddc.site | - |
-| OP1 | 3001 | https://op.diddc.site | [OP1_SERVICE_ID] |
-| OP2 | 3002 | https://op2.diddc.site | [OP2_SERVICE_ID] |
+| Trust Anchor | 3010 | https://ta.example.com | - |
+| OP1 | 3001 | https://op.example.com | [OP1_SERVICE_ID] |
+| OP2 | 3002 | https://op2.example.com | [OP2_SERVICE_ID] |
 | RP (Valid) | 3006 | - | - |
 | RP (Invalid) | 3007 | - | - |
 

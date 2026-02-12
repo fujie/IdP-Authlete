@@ -31,7 +31,7 @@ This error occurs when:
 
 1. Log in to Authlete dashboard: https://ap1.authlete.com/
 2. Navigate to **Services** → **Your Service** → **Clients**
-3. Search for the client using the Entity ID (e.g., `https://rp-test.diddc.site`)
+3. Search for the client using the Entity ID (e.g., `https://rp-test.example.com`)
 4. Check if a client with this Entity ID exists
 
 #### Step 2: Delete the Existing Client
@@ -54,7 +54,7 @@ curl http://localhost:3006/clear-registration
 # For multi-OP setup
 curl -X POST http://localhost:3006/clear-op \
   -H "Content-Type: application/json" \
-  -d '{"entity_id": "https://op.diddc.site"}'
+  -d '{"entity_id": "https://op.example.com"}'
 ```
 
 Or manually delete the credentials file:
@@ -82,7 +82,7 @@ If you cannot find the client in Authlete dashboard but still get the A327605 er
 2. **Temporary Workaround**: Use a different Entity ID for testing:
    ```bash
    # In .env file
-   ENTITY_ID=https://rp-test.diddc.site
+   ENTITY_ID=https://rp-test.example.com
    ```
 
 ## Error: A206201 - Dynamic Client Registration Not Supported
@@ -221,7 +221,7 @@ Error messages now provide clear, actionable guidance:
 
 ```
 ENTITY_ID_CONFLICT: A client with this entity ID already exists in Authlete.
-Please delete the existing client from the Authlete dashboard (Entity ID: https://rp-test.diddc.site)
+Please delete the existing client from the Authlete dashboard (Entity ID: https://rp-test.example.com)
 and try again. See console for detailed resolution steps.
 ```
 

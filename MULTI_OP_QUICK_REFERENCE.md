@@ -24,8 +24,8 @@ cd test-client-federation-valid && npm start
 PORT=3002 \
 AUTHLETE_SERVICE_ID=[OP2_SERVICE_ID] \
 AUTHLETE_SERVICE_ACCESS_TOKEN=[OP2_ACCESS_TOKEN] \
-OP_ENTITY_ID=https://op2.diddc.site \
-FEDERATION_TRUST_ANCHORS=https://ta.diddc.site \
+OP_ENTITY_ID=https://op2.example.com \
+FEDERATION_TRUST_ANCHORS=https://ta.example.com \
 npm start
 ```
 
@@ -51,20 +51,20 @@ curl http://localhost:3006/health  # RP
 
 ### OP1
 
-- Entity ID: `https://op.diddc.site`
+- Entity ID: `https://op.example.com`
 - Entity Type: `openid_provider`
 
 ### OP2
 
-- Entity ID: `https://op2.diddc.site`
+- Entity ID: `https://op2.example.com`
 - Entity Type: `openid_provider`
 
 ## RPでのOP選択
 
 1. http://localhost:3006 にアクセス
 2. **Select OP**セクションでEntity IDを入力:
-   - OP1: `https://op.diddc.site`
-   - OP2: `https://op2.diddc.site`
+   - OP1: `https://op.example.com`
+   - OP2: `https://op2.example.com`
 3. **Select OP**をクリック
 4. **Start Login**をクリック
 
@@ -116,8 +116,8 @@ kill -9 <PID>
 curl http://localhost:3010/admin
 
 # OPのEntity Configurationを確認
-curl https://op.diddc.site/.well-known/openid-federation
-curl https://op2.diddc.site/.well-known/openid-federation
+curl https://op.example.com/.well-known/openid-federation
+curl https://op2.example.com/.well-known/openid-federation
 ```
 
 ### クライアント登録が表示されない
