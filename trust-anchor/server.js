@@ -49,10 +49,42 @@ let keyPair = null;
 let publicJWK = null;
 let privateKey = null;
 
-// Initialize key pair on startup
-async function initializeKeyPair() {
+// Key persistence file
+const KEY_STORAGE_FILE = '.trust-anchor-keys.json';
+
+// Load or generate key pair
+async function loadOrGenerateKeyPair() {
+  const fs = await import('fs');
+  const { importJWK } = await import('jose');
+  
   try {
-    console.log('Generating RSA key pair for Trust Anchor...');
+    // Try to load existing keys
+    if (fs.existsSync(KEY_STORAGE_FILE)) {
+      console.log('Loading existing Trust Anchor key pair...');
+      const keyData = JSON.parse(fs.readFileSync(KEY_STORAGE_FILE, 'utf8'));
+      
+      // Import keys from JWK
+      publicJWK = keyData.publicJWK;
+      privateKey = await importJWK(keyData.privateJWK, 'RS256');
+      
+      console.log('Key pair loaded successfully');
+      console.log('Public JWK:', JSON.stringify(publicJWK, null, 2));
+      return;
+    }
+  } catch (error) {
+    console.warn('Failed to load existing keys, generating new ones:', error.message);
+  }
+  
+  // Generate new key pair if loading failed or file doesn't exist
+  await generateAndSaveKeyPair();
+}
+
+// Generate and save new key pair
+async function generateAndSaveKeyPair() {
+  const fs = await import('fs');
+  
+  try {
+    console.log('Generating new RSA key pair for Trust Anchor...');
     keyPair = await generateKeyPair('RS256', { modulusLength: 2048 });
     
     // Export public key as JWK
@@ -61,14 +93,36 @@ async function initializeKeyPair() {
     publicJWK.alg = 'RS256';
     publicJWK.kid = crypto.randomUUID();
     
+    // Export private key as JWK for storage
+    const privateJWK = await exportJWK(keyPair.privateKey);
+    
     privateKey = keyPair.privateKey;
     
-    console.log('Key pair generated successfully');
+    // Save keys to file
+    const keyData = {
+      publicJWK,
+      privateJWK,
+      createdAt: new Date().toISOString()
+    };
+    
+    fs.writeFileSync(KEY_STORAGE_FILE, JSON.stringify(keyData, null, 2));
+    console.log('Key pair generated and saved successfully');
     console.log('Public JWK:', JSON.stringify(publicJWK, null, 2));
+    console.log('');
+    console.log('⚠️  IMPORTANT: Register this JWKSet in Authlete dashboard:');
+    console.log('   Services → Your Service → OpenID Federation → Trust Anchors');
+    console.log('   Trust Anchor: ' + TRUST_ANCHOR_CONFIG.entityId);
+    console.log('   JWKS:', JSON.stringify({ keys: [publicJWK] }, null, 2));
+    console.log('');
   } catch (error) {
-    console.error('Failed to generate key pair:', error);
+    console.error('Failed to generate and save key pair:', error);
     process.exit(1);
   }
+}
+
+// Initialize key pair on startup
+async function initializeKeyPair() {
+  await loadOrGenerateKeyPair();
 }
 
 // Initialize entity storage from config

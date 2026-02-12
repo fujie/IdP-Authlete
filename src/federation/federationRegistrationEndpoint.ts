@@ -13,7 +13,10 @@ import {
 } from './interfaces';
 import { IntegratedTrustChainValidator } from './integratedTrustChainValidator';
 import { FederationRequestObjectHandler } from './federationRequestObjectHandler';
-import { AuthleteIntegrationServiceImpl } from './authleteIntegrationService';
+import { 
+  AuthleteIntegrationServiceImpl,
+  FederationRegistrationError 
+} from './authleteIntegrationService';
 import { AuthleteClient } from '../authlete/client';
 import { 
   AuthleteFederationRegistrationRequest,
@@ -170,38 +173,40 @@ export class FederationRegistrationEndpoint implements IFederationRegistrationEn
         application_type: registrationParameters.application_type || 'web',
         subject_type: registrationParameters.subject_type || 'public',
         id_token_signed_response_alg: registrationParameters.id_token_signed_response_alg || 'RS256',
-        token_endpoint_auth_method: registrationParameters.token_endpoint_auth_method || 'client_secret_basic'
+        // PKCE support: Use 'none' as default for public clients with PKCE
+        token_endpoint_auth_method: registrationParameters.token_endpoint_auth_method || 'none',
+        // PKCE configuration
+        ...(registrationParameters.token_endpoint_auth_method === 'none' || !registrationParameters.token_endpoint_auth_method) && {
+          // Public client type for PKCE
+          clientType: 'public',
+          // Require PKCE for public clients
+          pkceRequired: true,
+          // Support S256 code challenge method
+          pkceCodeChallengeMethods: ['S256']
+        }
       };
+
+      // Log the request being sent to Authlete (for debugging)
+      logger.logInfo(
+        'Prepared Authlete federation registration request',
+        'FederationRegistrationEndpoint',
+        {
+          hasEntityConfiguration: !!authleteRequest.entityConfiguration,
+          hasTrustChain: !!authleteRequest.trustChain,
+          trustChainLength: authleteRequest.trustChain?.length || 0,
+          hasTrustAnchorId: !!authleteRequest.trustAnchorId,
+          hasRedirectUris: !!authleteRequest.redirect_uris,
+          redirectUrisCount: authleteRequest.redirect_uris?.length || 0,
+          hasClientName: !!authleteRequest.client_name,
+          clientName: authleteRequest.client_name,
+          responseTypes: authleteRequest.response_types,
+          grantTypes: authleteRequest.grant_types
+        }
+      );
 
       let authleteResponse: AuthleteFederationRegistrationResponse;
       
-      try {
-        authleteResponse = await this.authleteIntegrationService.registerFederatedClient(authleteRequest);
-      } catch (registrationError: any) {
-        // Check if this is a "client_already_registered" error
-        if (registrationError.name === 'FederationRegistrationError' && 
-            registrationError.errorCode === 'client_already_registered') {
-          logger.logInfo(
-            'Client already registered, returning success',
-            'FederationRegistrationEndpoint',
-            {
-              entityId,
-              errorCode: registrationError.errorCode
-            }
-          );
-          
-          // Return a success response indicating the client is already registered
-          return {
-            clientId: entityId,
-            success: true,
-            alreadyRegistered: true,
-            message: 'Client is already registered with this entity ID'
-          } as FederationRegistrationResponse;
-        }
-        
-        // Re-throw other errors
-        throw registrationError;
-      }
+      authleteResponse = await this.authleteIntegrationService.registerFederatedClient(authleteRequest);
 
       // Step 5: Process Authlete response and return client credentials
       const registrationResponse = this.processAuthleteResponse(
@@ -226,13 +231,15 @@ export class FederationRegistrationEndpoint implements IFederationRegistrationEn
       // Handle and transform errors appropriately
       if (error instanceof FederationRegistrationError) {
         logger.logError({
-          message: 'Federation registration failed with known error',
+          message: `Federation registration failed: ${error.errorCode}`,
           component: 'FederationRegistrationEndpoint',
           error: {
             name: error.name,
-            message: error.message
+            message: error.message,
+            code: error.errorCode
           }
         });
+        // Re-throw the error as-is to preserve error details
         throw error;
       }
 
@@ -410,20 +417,6 @@ export class FederationRegistrationEndpoint implements IFederationRegistrationEn
       default:
         return 400;
     }
-  }
-}
-
-/**
- * Federation Registration Error
- */
-export class FederationRegistrationError extends Error {
-  constructor(
-    public readonly errorCode: string,
-    public readonly errorDescription: string,
-    public readonly statusCode: number = 400
-  ) {
-    super(errorDescription);
-    this.name = 'FederationRegistrationError';
   }
 }
 

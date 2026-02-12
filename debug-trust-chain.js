@@ -2,7 +2,7 @@
 const axios = require('axios');
 const https = require('https');
 
-const RP_ENTITY_ID = 'https://rp1.diddc.site';
+const RP_ENTITY_ID = 'https://rp-test.diddc.site';
 const TA_ENTITY_ID = 'https://ta.diddc.site';
 
 // Base64URL decode
@@ -96,8 +96,8 @@ async function main() {
   console.log('\n\n3. Trust Chain to be sent to Authlete');
   console.log('========================================');
   console.log('Array of 2 JWTs:');
-  console.log('  [0] RP Entity Configuration (iss=sub=rp1.diddc.site)');
-  console.log('  [1] TA Entity Statement (iss=ta.diddc.site, sub=rp1.diddc.site)');
+  console.log('  [0] RP Entity Configuration (iss=sub=rp-test.diddc.site)');
+  console.log('  [1] TA Entity Statement (iss=ta.diddc.site, sub=rp-test.diddc.site)');
   
   const trustChain = [rpConfig.jwt, taStatement.jwt];
   console.log('\nTrust Chain Length:', trustChain.length);

@@ -27,18 +27,19 @@ describe('MultiOPCredentialsManager - Unit Tests', () => {
 
   describe('Storing credentials', () => {
     it('should store credentials for a single OP', () => {
-      manager.storeCredentials('https://op1.example.com', 'secret123');
+      manager.storeCredentials('https://op1.example.com', 'secret123', null);
 
       const creds = manager.getCredentials('https://op1.example.com');
       expect(creds).not.toBeNull();
       expect(creds.clientSecret).toBe('secret123');
       expect(creds.opEntityId).toBe('https://op1.example.com');
+      expect(creds.usePKCE).toBe(false);
     });
 
     it('should store credentials for multiple OPs', () => {
-      manager.storeCredentials('https://op1.example.com', 'secret1');
-      manager.storeCredentials('https://op2.example.com', 'secret2');
-      manager.storeCredentials('https://op3.example.com', 'secret3');
+      manager.storeCredentials('https://op1.example.com', 'secret1', null);
+      manager.storeCredentials('https://op2.example.com', 'secret2', null);
+      manager.storeCredentials('https://op3.example.com', 'secret3', null);
 
       expect(manager.getCredentials('https://op1.example.com').clientSecret).toBe('secret1');
       expect(manager.getCredentials('https://op2.example.com').clientSecret).toBe('secret2');
@@ -46,8 +47,8 @@ describe('MultiOPCredentialsManager - Unit Tests', () => {
     });
 
     it('should update credentials if stored again', () => {
-      manager.storeCredentials('https://op1.example.com', 'secret1');
-      manager.storeCredentials('https://op1.example.com', 'secret2');
+      manager.storeCredentials('https://op1.example.com', 'secret1', null);
+      manager.storeCredentials('https://op1.example.com', 'secret2', null);
 
       const creds = manager.getCredentials('https://op1.example.com');
       expect(creds.clientSecret).toBe('secret2');
@@ -55,13 +56,21 @@ describe('MultiOPCredentialsManager - Unit Tests', () => {
 
     it('should include registeredAt timestamp', () => {
       const before = new Date().toISOString();
-      manager.storeCredentials('https://op1.example.com', 'secret123');
+      manager.storeCredentials('https://op1.example.com', 'secret123', null);
       const after = new Date().toISOString();
 
       const creds = manager.getCredentials('https://op1.example.com');
       expect(creds.registeredAt).toBeDefined();
       expect(creds.registeredAt >= before).toBe(true);
       expect(creds.registeredAt <= after).toBe(true);
+    });
+    
+    it('should set usePKCE flag when no client secret provided', () => {
+      manager.storeCredentials('https://op1.example.com', null, null);
+
+      const creds = manager.getCredentials('https://op1.example.com');
+      expect(creds.usePKCE).toBe(true);
+      expect(creds.clientSecret).toBeNull();
     });
   });
 
@@ -72,19 +81,20 @@ describe('MultiOPCredentialsManager - Unit Tests', () => {
     });
 
     it('should return credentials with all required fields', () => {
-      manager.storeCredentials('https://op1.example.com', 'secret123');
+      manager.storeCredentials('https://op1.example.com', 'secret123', null);
 
       const creds = manager.getCredentials('https://op1.example.com');
       expect(creds).toHaveProperty('opEntityId');
       expect(creds).toHaveProperty('clientSecret');
       expect(creds).toHaveProperty('registeredAt');
       expect(creds).toHaveProperty('rpEntityId');
+      expect(creds).toHaveProperty('usePKCE');
     });
   });
 
   describe('Checking credentials existence', () => {
     it('should return true for existing OP', () => {
-      manager.storeCredentials('https://op1.example.com', 'secret123');
+      manager.storeCredentials('https://op1.example.com', 'secret123', null);
       expect(manager.hasCredentials('https://op1.example.com')).toBe(true);
     });
 
@@ -95,8 +105,8 @@ describe('MultiOPCredentialsManager - Unit Tests', () => {
 
   describe('Clearing credentials', () => {
     it('should clear credentials for specific OP', () => {
-      manager.storeCredentials('https://op1.example.com', 'secret1');
-      manager.storeCredentials('https://op2.example.com', 'secret2');
+      manager.storeCredentials('https://op1.example.com', 'secret1', null);
+      manager.storeCredentials('https://op2.example.com', 'secret2', null);
 
       manager.clearCredentials('https://op1.example.com');
 
@@ -111,7 +121,7 @@ describe('MultiOPCredentialsManager - Unit Tests', () => {
     });
 
     it('should persist cleared state to disk', () => {
-      manager.storeCredentials('https://op1.example.com', 'secret1');
+      manager.storeCredentials('https://op1.example.com', 'secret1', null);
       manager.clearCredentials('https://op1.example.com');
 
       // Create new manager instance
@@ -131,9 +141,9 @@ describe('MultiOPCredentialsManager - Unit Tests', () => {
     });
 
     it('should return all registered OP entity IDs', () => {
-      manager.storeCredentials('https://op1.example.com', 'secret1');
-      manager.storeCredentials('https://op2.example.com', 'secret2');
-      manager.storeCredentials('https://op3.example.com', 'secret3');
+      manager.storeCredentials('https://op1.example.com', 'secret1', null);
+      manager.storeCredentials('https://op2.example.com', 'secret2', null);
+      manager.storeCredentials('https://op3.example.com', 'secret3', null);
 
       const ops = manager.getRegisteredOPs();
       expect(ops).toHaveLength(3);
@@ -145,7 +155,7 @@ describe('MultiOPCredentialsManager - Unit Tests', () => {
 
   describe('Persistence', () => {
     it('should persist credentials to disk', () => {
-      manager.storeCredentials('https://op1.example.com', 'secret123');
+      manager.storeCredentials('https://op1.example.com', 'secret123', null);
 
       expect(fs.existsSync(testCredentialsFile)).toBe(true);
 
@@ -156,7 +166,7 @@ describe('MultiOPCredentialsManager - Unit Tests', () => {
     });
 
     it('should load credentials from disk on initialization', () => {
-      manager.storeCredentials('https://op1.example.com', 'secret123');
+      manager.storeCredentials('https://op1.example.com', 'secret123', null);
 
       // Create new manager instance
       const manager2 = new MultiOPCredentialsManager({
@@ -170,7 +180,7 @@ describe('MultiOPCredentialsManager - Unit Tests', () => {
     });
 
     it('should not load credentials if RP entity ID differs', () => {
-      manager.storeCredentials('https://op1.example.com', 'secret123');
+      manager.storeCredentials('https://op1.example.com', 'secret123', null);
 
       // Create manager with different RP entity ID
       const manager2 = new MultiOPCredentialsManager({
@@ -184,8 +194,8 @@ describe('MultiOPCredentialsManager - Unit Tests', () => {
 
   describe('Statistics', () => {
     it('should return correct statistics', () => {
-      manager.storeCredentials('https://op1.example.com', 'secret1');
-      manager.storeCredentials('https://op2.example.com', 'secret2');
+      manager.storeCredentials('https://op1.example.com', 'secret1', null);
+      manager.storeCredentials('https://op2.example.com', 'secret2', null);
 
       const stats = manager.getStats();
       expect(stats.rpEntityId).toBe('https://test-rp.example.com');

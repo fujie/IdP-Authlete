@@ -71,16 +71,26 @@ export class TokenControllerImpl implements TokenController {
         return;
       }
 
-      // Extract client credentials using both authentication methods
+      // Extract client credentials using multiple authentication methods
       const clientInfo = this.extractClientCredentials(req);
+      
+      // Determine authentication method for logging
+      let authMethod = 'unknown';
+      if (req.body.client_id && req.body.code_verifier) {
+        authMethod = 'pkce';
+      } else if (req.body.client_id && req.body.client_secret) {
+        authMethod = 'client_secret_post';
+      } else if (req.headers.authorization?.startsWith('Basic ')) {
+        authMethod = 'client_secret_basic';
+      }
       
       // Debug: Log client credentials extraction
       childLogger.logInfo('Client credentials extraction', 'TokenController', {
         hasClientInfo: !!clientInfo,
         clientId: clientInfo?.clientId,
         hasClientSecret: !!clientInfo?.clientSecret,
-        clientSecretLength: clientInfo?.clientSecret?.length,
-        authMethod: req.body.client_id ? 'client_secret_post' : 'client_secret_basic'
+        hasCodeVerifier: !!req.body.code_verifier,
+        authMethod: authMethod
       });
       
       if (!clientInfo) {
@@ -106,11 +116,27 @@ export class TokenControllerImpl implements TokenController {
       const tokenRequest: TokenRequest = {
         parameters: this.buildParametersString(req.body),
         clientId: clientInfo.clientId,
-        clientSecret: clientInfo.clientSecret
+        // Only include clientSecret if it's not empty (PKCE uses no client secret)
+        ...(clientInfo.clientSecret && { clientSecret: clientInfo.clientSecret })
       };
+      
+      // Debug: Log token request details
+      clientLogger.logInfo('Preparing Authlete token request', 'TokenController', {
+        clientId: tokenRequest.clientId,
+        hasClientSecret: !!tokenRequest.clientSecret,
+        clientSecretIncluded: 'clientSecret' in tokenRequest,
+        parametersPreview: tokenRequest.parameters.substring(0, 200)
+      });
 
       // Call Authlete token API
       const tokenResponse = await this.authleteClient.token(tokenRequest);
+      
+      // Debug: Log Authlete response
+      clientLogger.logInfo('Authlete token response received', 'TokenController', {
+        action: tokenResponse.action,
+        resultCode: (tokenResponse as any).resultCode,
+        resultMessage: (tokenResponse as any).resultMessage
+      });
 
       // Handle response based on action
       switch (tokenResponse.action) {
@@ -240,7 +266,8 @@ export class TokenControllerImpl implements TokenController {
   }
 
   /**
-   * Extract client credentials from request using both client_secret_basic and client_secret_post methods
+   * Extract client credentials from request using multiple authentication methods
+   * Supports: client_secret_post, client_secret_basic, and PKCE (client_id only)
    */
   private extractClientCredentials(req: Request): ClientInfo | null {
     // Method 1: client_secret_post - credentials in request body
@@ -277,6 +304,15 @@ export class TokenControllerImpl implements TokenController {
           context: { authHeader }
         });
       }
+    }
+
+    // Method 3: PKCE - client_id only with code_verifier (no client_secret)
+    // This is used when the client uses PKCE for authentication
+    if (req.body.client_id && req.body.code_verifier) {
+      return {
+        clientId: req.body.client_id,
+        clientSecret: '' // Empty string for PKCE - Authlete will validate using code_verifier
+      };
     }
 
     return null;

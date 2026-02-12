@@ -12,6 +12,7 @@ import { OPTrustChainValidator } from './lib/opTrustChainValidator.js';
 import { OPDiscoveryService } from './lib/opDiscoveryService.js';
 import { MultiOPCredentialsManager } from './lib/multiOPCredentialsManager.js';
 import { validateEntityId } from './lib/entityIdValidator.js';
+import { generatePKCEParams } from './lib/pkceUtils.js';
 
 // ES modules equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -259,7 +260,8 @@ async function createEntityConfiguration() {
         scope: FEDERATION_CONFIG.scope,
         contacts: FEDERATION_CONFIG.contacts,
         application_type: 'web',
-        token_endpoint_auth_method: 'client_secret_basic',
+        // Support PKCE (none) as primary method, with client_secret_basic as fallback
+        token_endpoint_auth_method: 'none',
         id_token_signed_response_alg: 'RS256',
         token_endpoint_auth_signing_alg: 'RS256',
         userinfo_signed_response_alg: 'RS256',
@@ -319,7 +321,7 @@ async function createFederationRequestObject(state, nonce) {
 }
 
 // Create federation request object for selected OP
-async function createFederationRequestObjectForOP(opEntityId, state, nonce) {
+async function createFederationRequestObjectForOP(opEntityId, state, nonce, pkceParams = null) {
   const now = Math.floor(Date.now() / 1000);
   const expiration = now + 300; // 5 minutes
 
@@ -338,10 +340,18 @@ async function createFederationRequestObjectForOP(opEntityId, state, nonce) {
     state: state,
     nonce: nonce
   };
+  
+  // Add PKCE parameters if provided
+  if (pkceParams) {
+    payload.code_challenge = pkceParams.codeChallenge;
+    payload.code_challenge_method = pkceParams.codeChallengeMethod;
+    console.log('Added PKCE parameters to request object');
+  }
 
   console.log('Creating request object for selected OP', {
     clientId: clientId,
-    audience: opEntityId
+    audience: opEntityId,
+    hasPKCE: !!pkceParams
   });
 
   // Sign the request object
@@ -387,31 +397,6 @@ async function performDynamicRegistration() {
 
     console.log('Registration response:', response.data);
 
-    // Check if client is already registered
-    if (response.data.already_registered) {
-      console.log('⚠️  Client already registered');
-      
-      // Try to load persisted credentials
-      if (loadPersistedCredentials()) {
-        console.log('✓ Using persisted credentials');
-        console.log('Entity ID (client_id):', FEDERATION_CONFIG.entityId);
-        console.log('Client Secret:', registeredClientSecret ? '[SET]' : '[NOT SET]');
-        return { entityId: FEDERATION_CONFIG.entityId, clientSecret: registeredClientSecret };
-      }
-      
-      // If no persisted credentials, this means the client was registered in Authlete
-      // but the local credentials were cleared. We cannot proceed without the client_secret.
-      console.log('⚠️  Client is registered in Authlete but local credentials are missing');
-      console.log('⚠️  Please delete the client from Authlete dashboard or contact administrator');
-      
-      // Return a special error that indicates this situation
-      throw new Error(
-        'CREDENTIALS_MISSING: Client is registered in Authlete but local credentials are not available. ' +
-        'Please delete the client from Authlete dashboard (Entity ID: ' + FEDERATION_CONFIG.entityId + ') ' +
-        'or restore the credentials file.'
-      );
-    }
-
     // Store registered client secret (entity_idは常に同じなので保存不要)
     registeredClientSecret = response.data.client_secret;
 
@@ -425,22 +410,41 @@ async function performDynamicRegistration() {
     return { entityId: FEDERATION_CONFIG.entityId, clientSecret: registeredClientSecret };
 
   } catch (error) {
-    // Check if this is a duplicate registration error (Entity ID already exists)
-    if (error.response?.status === 500 && 
-        error.response?.data?.error_description?.includes('already in use')) {
-      console.log('⚠️  Entity ID already registered (duplicate registration detected)');
-      console.log('This is expected behavior - the client was registered in a previous session');
+    // Check for entity_id_conflict error (A327605) - PKCE Fallback
+    if (error.response?.data?.error === 'entity_id_conflict' ||
+        error.response?.data?.error_description?.includes('A327605') ||
+        error.response?.data?.error_description?.includes('already exists') ||
+        error.response?.data?.resultCode === 'A327605') {
+      console.log('⚠️  Entity ID conflict detected (A327605) - Using PKCE fallback');
+      console.log('This is expected behavior due to Authlete soft delete');
+      console.log('Will proceed with PKCE-based authentication (no client secret required)');
+      console.log('');
       
-      // Try to load persisted credentials
-      if (loadPersistedCredentials()) {
-        console.log('✓ Using persisted credentials');
-        return { entityId: FEDERATION_CONFIG.entityId, clientSecret: registeredClientSecret };
-      }
+      // Return without client secret - will use PKCE instead
+      return { 
+        entityId: FEDERATION_CONFIG.entityId, 
+        clientSecret: null,
+        usePKCE: true 
+      };
+    }
+    
+    // Check for registration_not_supported error (A206201)
+    if (error.response?.data?.error === 'registration_not_supported' ||
+        error.response?.data?.error_description?.includes('A206201') ||
+        error.response?.data?.error_description?.includes('does not support dynamic client registration')) {
+      console.error('⚠️  Dynamic Client Registration not enabled');
+      console.error('');
+      console.error('RESOLUTION STEPS:');
+      console.error('1. Log in to Authlete dashboard: https://ap1.authlete.com/');
+      console.error('2. Navigate to Services → Your Service → Settings');
+      console.error('3. Enable "Dynamic Client Registration"');
+      console.error('4. Save the settings');
+      console.error('5. Try registration again');
+      console.error('');
       
-      // If no persisted credentials, provide helpful error
       throw new Error(
-        'Client already registered but credentials not available. ' +
-        'Please use the /clear-registration endpoint to reset, or delete the client from Authlete.'
+        'REGISTRATION_NOT_SUPPORTED: Dynamic Client Registration is not enabled for this service. ' +
+        'Please enable it in the Authlete dashboard. See console for detailed resolution steps.'
       );
     }
     
@@ -540,6 +544,7 @@ app.get('/federation-login', async (req, res) => {
     
     // Retrieve OP-specific credentials from credentials manager (Requirement 5.2)
     let opCredentials = multiOPCredentialsManager.getCredentials(opEntityId);
+    let usePKCE = false;
     
     // Perform dynamic registration if credentials missing (Requirement 6.5, 7.1)
     if (!opCredentials) {
@@ -561,46 +566,156 @@ app.get('/federation-login', async (req, res) => {
       
       console.log('Sending registration request to:', registrationEndpoint);
       
-      // Send registration request
-      const response = await axios.post(
-        registrationEndpoint,
-        registrationRequest,
-        {
-          headers: {
-            'Content-Type': 'application/json'
+      try {
+        // Send registration request
+        const response = await axios.post(
+          registrationEndpoint,
+          registrationRequest,
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            }
           }
+        );
+        
+        console.log('Registration response:', response.data);
+        
+        // Check if client_secret was returned
+        if (!response.data.client_secret) {
+          console.error('Registration response missing client_secret', {
+            opEntityId,
+            responseKeys: Object.keys(response.data)
+          });
+          
+          throw new Error(
+            'REGISTRATION_INCOMPLETE: Registration response did not include client_secret. ' +
+            'This indicates an issue with the registration process. ' +
+            'Please check the OP\'s Authlete dashboard for the client (Entity ID: ' + FEDERATION_CONFIG.entityId + ').'
+          );
         }
-      );
-      
-      console.log('Registration response:', response.data);
-      
-      // Store credentials for selected OP after registration (Requirement 6.3)
-      const clientSecret = response.data.client_secret;
-      multiOPCredentialsManager.storeCredentials(opEntityId, clientSecret);
-      
-      opCredentials = { clientSecret };
-      
-      console.log('Dynamic registration successful for OP', { opEntityId });
+        
+        // Store credentials for selected OP after registration (Requirement 6.3)
+        const clientSecret = response.data.client_secret;
+        multiOPCredentialsManager.storeCredentials(opEntityId, clientSecret, null);
+        
+        opCredentials = { clientSecret };
+        
+        console.log('Dynamic registration successful for OP', { opEntityId });
+        
+      } catch (registrationError) {
+        // Log the full error response for debugging
+        console.log('Registration error caught:', {
+          status: registrationError.response?.status,
+          data: registrationError.response?.data,
+          message: registrationError.message
+        });
+        
+        // Check for A327605 error (Entity ID already in use) - Use PKCE fallback
+        // Check multiple possible locations for the error code
+        const errorData = registrationError.response?.data;
+        const errorDescription = errorData?.error_description || '';
+        const resultCode = errorData?.resultCode || '';
+        
+        // Also check if error_description contains A327605 or "already in use"
+        const isA327605Error = 
+          errorData?.error === 'entity_id_conflict' ||
+          errorDescription.includes('A327605') ||
+          errorDescription.includes('already in use') ||
+          errorDescription.includes('already exists') ||
+          resultCode === 'A327605';
+        
+        console.log('A327605 error check:', {
+          isA327605Error,
+          error: errorData?.error,
+          errorDescription: errorDescription.substring(0, 100),
+          resultCode: resultCode
+        });
+        
+        if (isA327605Error) {
+          console.log('⚠️  Entity ID conflict detected (A327605) - Using PKCE fallback');
+          console.log('Error details:', {
+            error: errorData?.error,
+            errorDescription: errorDescription,
+            resultCode: resultCode
+          });
+          console.log('This is expected behavior due to Authlete soft delete');
+          console.log('Will proceed with PKCE-based authentication (no client secret required)');
+          
+          // Set flag to use PKCE instead of client secret
+          usePKCE = true;
+          opCredentials = { clientSecret: null, usePKCE: true };
+          
+          // Store PKCE flag for this OP (with null client_secret and null codeVerifier)
+          multiOPCredentialsManager.storeCredentials(opEntityId, null, null);
+          
+        } else {
+          // Log registration error details and throw to outer catch block
+          console.error('Dynamic registration failed', {
+            opEntityId,
+            error: registrationError.message,
+            status: registrationError.response?.status,
+            statusText: registrationError.response?.statusText,
+            data: registrationError.response?.data
+          });
+          
+          // Create a more descriptive error to throw
+          const error = new Error(
+            registrationError.response?.data?.error_description || 
+            registrationError.response?.data?.error || 
+            registrationError.message ||
+            'Dynamic client registration failed'
+          );
+          error.opEntityId = opEntityId;
+          error.originalError = registrationError;
+          throw error;
+        }
+      }
     } else {
       console.log('Using existing credentials for OP', { opEntityId });
+      // Check if this OP requires PKCE
+      usePKCE = opCredentials.usePKCE || false;
     }
     
     console.log('=== Federation Login Flow ===');
     console.log('OP Entity ID:', opEntityId);
     console.log('Client ID (Entity ID):', FEDERATION_CONFIG.entityId); // Requirement 7.5
     console.log('Has Client Secret:', !!opCredentials.clientSecret);
+    console.log('Using PKCE:', usePKCE);
     
     // Generate unique state and nonce for each request (Requirement 5.3, 5.4)
     const state = uuidv4();
     const nonce = uuidv4();
     
+    // Generate PKCE parameters if using PKCE
+    let pkceParams = null;
+    if (usePKCE || !opCredentials.clientSecret) {
+      pkceParams = generatePKCEParams();
+      console.log('Generated PKCE parameters:', {
+        codeChallengeMethod: pkceParams.codeChallengeMethod,
+        codeChallenge: pkceParams.codeChallenge.substring(0, 20) + '...',
+        codeVerifierLength: pkceParams.codeVerifier.length
+      });
+      
+      // Store code verifier in session for token exchange
+      req.session.pkceCodeVerifier = pkceParams.codeVerifier;
+      req.session.usePKCE = true;
+      
+      console.log('Stored PKCE parameters in session:', {
+        sessionID: req.sessionID,
+        hasCodeVerifier: !!req.session.pkceCodeVerifier,
+        hasUsePKCE: !!req.session.usePKCE
+      });
+    }
+    
     // Store state in both session and memory store
     req.session.oauthState = state;
     req.session.selectedOPForAuth = opEntityId; // Store for callback
+    
     oauthStates.set(state, {
       timestamp: Date.now(),
       sessionId: req.sessionID,
-      opEntityId: opEntityId
+      opEntityId: opEntityId,
+      pkceCodeVerifier: pkceParams ? pkceParams.codeVerifier : null
     });
 
     console.log('Starting OpenID Federation flow');
@@ -616,11 +731,30 @@ app.get('/federation-login', async (req, res) => {
 
       try {
         // Create federation request object with selected OP as audience
-        const requestObject = await createFederationRequestObjectForOP(opEntityId, state, nonce);
+        const requestObject = await createFederationRequestObjectForOP(
+          opEntityId, 
+          state, 
+          nonce,
+          pkceParams // Pass PKCE params to include in request object
+        );
 
         // Build authorization URL with selected OP's authorization_endpoint (Requirement 5.1)
         const authUrl = new URL(opMetadata.authorization_endpoint);
+        
+        // Add core OAuth parameters as query parameters (required even when using request object)
+        authUrl.searchParams.append('client_id', FEDERATION_CONFIG.entityId);
+        authUrl.searchParams.append('response_type', 'code');
+        authUrl.searchParams.append('redirect_uri', FEDERATION_CONFIG.redirectUri);
+        authUrl.searchParams.append('scope', FEDERATION_CONFIG.scope);
+        authUrl.searchParams.append('state', state);
         authUrl.searchParams.append('request', requestObject);
+        
+        // Add PKCE parameters to authorization URL if using PKCE
+        if (pkceParams) {
+          authUrl.searchParams.append('code_challenge', pkceParams.codeChallenge);
+          authUrl.searchParams.append('code_challenge_method', pkceParams.codeChallengeMethod);
+          console.log('Added PKCE parameters to authorization URL');
+        }
 
         console.log('Redirecting to selected OP authorization server');
         console.log('Authorization URL:', authUrl.toString().substring(0, 100) + '...');
@@ -633,10 +767,24 @@ app.get('/federation-login', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Federation login failed:', error);
+    console.error('Federation login failed:', {
+      message: error.message,
+      stack: error.stack,
+      opEntityId: error.opEntityId,
+      originalError: error.originalError
+    });
+    
+    // Determine OP entity ID for error display
+    const errorOpEntityId = error.opEntityId || 
+                           (req.session.selectedOPForAuth) || 
+                           (req.session.selectedOP && req.session.selectedOP.entityId) ||
+                           FEDERATION_CONFIG.authorizationServer ||
+                           'unknown';
+    
     res.render('error', {
       error: 'login_failed',
-      error_description: error.response?.data?.error_description || error.message || 'Federation login failed'
+      error_description: error.message || 'Federation login failed',
+      opEntityId: errorOpEntityId
     });
   }
 });
@@ -650,7 +798,11 @@ app.get('/callback', async (req, res) => {
     code: code ? 'present' : 'missing',
     state: state,
     error: error,
-    sessionID: req.sessionID
+    sessionID: req.sessionID,
+    hasSession: !!req.session,
+    sessionKeys: req.session ? Object.keys(req.session) : [],
+    hasPKCECodeVerifier: !!(req.session && req.session.pkceCodeVerifier),
+    hasUsePKCE: !!(req.session && req.session.usePKCE)
   });
 
   // Handle authorization errors
@@ -689,13 +841,13 @@ app.get('/callback', async (req, res) => {
   
   console.log('Processing callback for OP', { opEntityId });
 
-  // Clean up state
-  if (memoryStateValid) {
-    oauthStates.delete(state);
-  }
-  delete req.session.oauthState;
-
   if (!code) {
+    // Clean up state before returning error
+    if (memoryStateValid) {
+      oauthStates.delete(state);
+    }
+    delete req.session.oauthState;
+    
     return res.render('error', {
       error: 'missing_code',
       error_description: 'Authorization code not received'
@@ -714,9 +866,39 @@ app.get('/callback', async (req, res) => {
     // Use OP-specific credentials for token exchange (Requirement 8.2)
     const opCredentials = multiOPCredentialsManager.getCredentials(opEntityId);
     
-    if (!opCredentials || !opCredentials.clientSecret) {
-      console.error('No credentials found for OP', { opEntityId });
+    // Check if using PKCE (from session or credentials)
+    const usePKCE = req.session.usePKCE || (opCredentials && opCredentials.usePKCE);
+    let pkceCodeVerifier = req.session.pkceCodeVerifier;
+    
+    // Fallback: Try to get code_verifier from memory store if not in session
+    if (usePKCE && !pkceCodeVerifier && memoryStateValid) {
+      const stateData = oauthStates.get(state);
+      if (stateData && stateData.pkceCodeVerifier) {
+        pkceCodeVerifier = stateData.pkceCodeVerifier;
+        console.log('Retrieved PKCE code_verifier from memory store (session fallback)');
+      }
+    }
+    
+    // Clean up state after retrieving PKCE parameters
+    if (memoryStateValid) {
+      oauthStates.delete(state);
+    }
+    delete req.session.oauthState;
+    
+    // Validate credentials or PKCE parameters
+    if (!usePKCE && (!opCredentials || !opCredentials.clientSecret)) {
+      console.error('No credentials found for OP and PKCE not enabled', { opEntityId });
       throw new Error(`No credentials found for OP ${opEntityId}. Please try logging in again.`);
+    }
+    
+    if (usePKCE && !pkceCodeVerifier) {
+      console.error('PKCE enabled but code verifier not found in session or memory store', { 
+        opEntityId,
+        hasSession: !!req.session,
+        sessionId: req.sessionID,
+        hasMemoryState: memoryStateValid
+      });
+      throw new Error('PKCE code verifier missing from session. Please try logging in again.');
     }
 
     // Exchange authorization code for access token using selected OP's token_endpoint (Requirement 8.1)
@@ -724,16 +906,32 @@ app.get('/callback', async (req, res) => {
     console.log('OP Entity ID:', opEntityId);
     console.log('Token Endpoint:', opMetadata.token_endpoint);
     console.log('Using entity_id as client_id:', FEDERATION_CONFIG.entityId);
+    console.log('Using PKCE:', usePKCE);
+    console.log('PKCE code_verifier available:', !!pkceCodeVerifier);
+    console.log('Client secret available:', !!(opCredentials && opCredentials.clientSecret));
+    
+    // Build token request parameters
+    const tokenParams = {
+      grant_type: 'authorization_code',
+      code: code,
+      redirect_uri: FEDERATION_CONFIG.redirectUri,
+      client_id: FEDERATION_CONFIG.entityId // entity_idをclient_idとして使用
+    };
+    
+    // Add authentication method based on PKCE or client secret
+    if (usePKCE) {
+      // PKCE: send code_verifier, no client_secret
+      tokenParams.code_verifier = pkceCodeVerifier;
+      console.log('Using PKCE authentication (code_verifier)');
+    } else {
+      // Client Secret: send client_secret
+      tokenParams.client_secret = opCredentials.clientSecret;
+      console.log('Using client_secret authentication');
+    }
     
     const tokenResponse = await axios.post(
       opMetadata.token_endpoint, // Use selected OP's token endpoint
-      new URLSearchParams({
-        grant_type: 'authorization_code',
-        code: code,
-        redirect_uri: FEDERATION_CONFIG.redirectUri,
-        client_id: FEDERATION_CONFIG.entityId, // entity_idをclient_idとして使用
-        client_secret: opCredentials.clientSecret // Use OP-specific credentials
-      }),
+      new URLSearchParams(tokenParams),
       {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded'
@@ -743,6 +941,10 @@ app.get('/callback', async (req, res) => {
 
     const tokenData = tokenResponse.data;
     console.log('Token response received');
+    
+    // Clear PKCE parameters from session after successful exchange
+    delete req.session.pkceCodeVerifier;
+    delete req.session.usePKCE;
 
     // Store access_token and id_token in session (Requirement 8.3, 8.4)
     req.session.accessToken = tokenData.access_token;
@@ -870,9 +1072,18 @@ app.get('/clear-registration', (req, res) => {
   // Also clear old single-OP credentials if they exist
   clearPersistedCredentials();
   
+  // IMPORTANT: Clear session data to remove any cached client secrets
+  if (req.session) {
+    req.session.destroy((err) => {
+      if (err) {
+        console.error('Error destroying session:', err);
+      }
+    });
+  }
+  
   res.json({
     success: true,
-    message: 'All client registrations cleared. You can now register again.'
+    message: 'All client registrations and session data cleared. You can now register again.'
   });
 });
 

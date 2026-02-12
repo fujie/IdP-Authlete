@@ -463,16 +463,67 @@ export class AuthleteClientImpl implements AuthleteClient {
 
   async federationRegistration(request: AuthleteFederationRegistrationRequest): Promise<AuthleteFederationRegistrationResponse> {
     // Prepare the request body according to Authlete's specification
-    // The body should contain EITHER entityConfiguration OR trustChain, not both
-    const requestBody: { entityConfiguration?: string; trustChain?: string } = {};
+    // The body should contain entityConfiguration or trustChain, plus metadata
+    const requestBody: any = {};
     
+    // Add federation-specific fields
     if (request.entityConfiguration) {
       // Use entityConfiguration (JWT string)
       requestBody.entityConfiguration = request.entityConfiguration;
-    } else if (request.trustChain && request.trustChain.length > 0) {
-      // Use trustChain (JSON string)
+    }
+    
+    if (request.trustChain && request.trustChain.length > 0) {
+      // Use trustChain (JSON string - Authlete expects a JSON-encoded string, not an array)
       requestBody.trustChain = JSON.stringify(request.trustChain);
-    } else {
+    }
+    
+    if (request.trustAnchorId) {
+      requestBody.trustAnchorId = request.trustAnchorId;
+    }
+    
+    // Add client metadata fields (required by Authlete)
+    if (request.redirect_uris && request.redirect_uris.length > 0) {
+      requestBody.redirect_uris = request.redirect_uris;
+    }
+    
+    if (request.client_name) {
+      requestBody.client_name = request.client_name;
+    }
+    
+    if (request.client_uri) {
+      requestBody.client_uri = request.client_uri;
+    }
+    
+    if (request.contacts && request.contacts.length > 0) {
+      requestBody.contacts = request.contacts;
+    }
+    
+    if (request.response_types && request.response_types.length > 0) {
+      requestBody.response_types = request.response_types;
+    }
+    
+    if (request.grant_types && request.grant_types.length > 0) {
+      requestBody.grant_types = request.grant_types;
+    }
+    
+    if (request.application_type) {
+      requestBody.application_type = request.application_type;
+    }
+    
+    if (request.subject_type) {
+      requestBody.subject_type = request.subject_type;
+    }
+    
+    if (request.id_token_signed_response_alg) {
+      requestBody.id_token_signed_response_alg = request.id_token_signed_response_alg;
+    }
+    
+    if (request.token_endpoint_auth_method) {
+      requestBody.token_endpoint_auth_method = request.token_endpoint_auth_method;
+    }
+    
+    // Validate that we have at least entityConfiguration or trustChain
+    if (!requestBody.entityConfiguration && (!requestBody.trustChain || requestBody.trustChain.length === 0)) {
       throw new Error('Either entityConfiguration or trustChain must be provided');
     }
     
@@ -482,6 +533,9 @@ export class AuthleteClientImpl implements AuthleteClient {
       {
         hasEntityConfiguration: !!requestBody.entityConfiguration,
         hasTrustChain: !!requestBody.trustChain,
+        hasTrustAnchorId: !!requestBody.trustAnchorId,
+        hasRedirectUris: !!requestBody.redirect_uris,
+        hasClientName: !!requestBody.client_name,
         endpoint: this.getApiPath('/federation/registration'),
         requestPayload: JSON.stringify(requestBody, null, 2)
       }
@@ -517,7 +571,13 @@ export class AuthleteClientImpl implements AuthleteClient {
         context: {
           endpoint: this.getApiPath('/federation/registration'),
           hasEntityConfiguration: !!requestBody.entityConfiguration,
-          hasTrustChain: !!requestBody.trustChain
+          hasTrustChain: !!requestBody.trustChain,
+          hasRedirectUris: !!requestBody.redirect_uris,
+          // Add Authlete response details for debugging
+          ...(error instanceof AuthleteApiError && {
+            authleteStatusCode: error.statusCode,
+            authleteResponse: JSON.stringify(error.authleteResponse, null, 2)
+          })
         }
       });
       throw error;

@@ -36,21 +36,25 @@ class MultiOPCredentialsManager {
   /**
    * Store credentials for an OP
    * @param {string} opEntityId - OP's entity ID
-   * @param {string} clientSecret - Client secret from registration
+   * @param {string} clientSecret - Client secret from registration (can be null for PKCE-only)
+   * @param {string} codeVerifier - PKCE code verifier (not stored, only used to determine usePKCE flag)
    */
-  storeCredentials(opEntityId, clientSecret) {
-    console.log('Storing credentials for OP', { opEntityId });
+  storeCredentials(opEntityId, clientSecret, codeVerifier) {
+    const usePKCE = !clientSecret || !!codeVerifier;
+    console.log('Storing credentials for OP', { opEntityId, usePKCE });
 
     this.credentials.ops[opEntityId] = {
       clientSecret: clientSecret,
-      registeredAt: new Date().toISOString()
+      registeredAt: new Date().toISOString(),
+      usePKCE: usePKCE
     };
 
     this._saveCredentials();
 
     console.log('Credentials stored successfully', {
       opEntityId,
-      registeredAt: this.credentials.ops[opEntityId].registeredAt
+      registeredAt: this.credentials.ops[opEntityId].registeredAt,
+      usePKCE: this.credentials.ops[opEntityId].usePKCE
     });
   }
 
@@ -71,7 +75,8 @@ class MultiOPCredentialsManager {
       opEntityId: opEntityId,
       clientSecret: opCreds.clientSecret,
       registeredAt: opCreds.registeredAt,
-      rpEntityId: this.rpEntityId
+      rpEntityId: this.rpEntityId,
+      usePKCE: opCreds.usePKCE || false
     };
   }
 
