@@ -265,7 +265,7 @@ async function createEntityConfiguration() {
         id_token_signed_response_alg: 'RS256',
         token_endpoint_auth_signing_alg: 'RS256',
         userinfo_signed_response_alg: 'RS256',
-        client_registration_types: ['explicit']
+        client_registration_types: ['automatic', 'explicit']
       },
       federation_entity: {
         organization_name: FEDERATION_CONFIG.clientName,
@@ -580,27 +580,15 @@ app.get('/federation-login', async (req, res) => {
         
         console.log('Registration response:', response.data);
         
-        // Check if client_secret was returned
-        if (!response.data.client_secret) {
-          console.error('Registration response missing client_secret', {
-            opEntityId,
-            responseKeys: Object.keys(response.data)
-          });
-          
-          throw new Error(
-            'REGISTRATION_INCOMPLETE: Registration response did not include client_secret. ' +
-            'This indicates an issue with the registration process. ' +
-            'Please check the OP\'s Authlete dashboard for the client (Entity ID: ' + FEDERATION_CONFIG.entityId + ').'
-          );
-        }
-        
-        // Store credentials for selected OP after registration (Requirement 6.3)
-        const clientSecret = response.data.client_secret;
-        multiOPCredentialsManager.storeCredentials(opEntityId, clientSecret, null);
-        
-        opCredentials = { clientSecret };
-        
-        console.log('Dynamic registration successful for OP', { opEntityId });
+        // Since we declare token_endpoint_auth_method: 'none' (Public client with PKCE),
+        // always use PKCE regardless of whether Authlete returns a client_secret.
+        // Authlete may return a client_secret even for public clients, but the token endpoint
+        // will reject client_secret authentication when the client is configured as public.
+        console.log('Registration successful - using PKCE mode (token_endpoint_auth_method: none)', { opEntityId });
+        usePKCE = true;
+        multiOPCredentialsManager.storeCredentials(opEntityId, null, null);
+        opCredentials = { clientSecret: null, usePKCE: true };
+        console.log('Dynamic registration successful for OP (PKCE mode)', { opEntityId });
         
       } catch (registrationError) {
         // Log the full error response for debugging
