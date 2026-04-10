@@ -143,6 +143,29 @@ export class AuthleteIntegrationServiceImpl implements AuthleteIntegrationServic
   private processRegistrationResponse(
     response: AuthleteFederationRegistrationResponse
   ): ProcessedRegistrationResponse {
+    // Check for A327605 error (Entity ID already registered)
+    // This is not an error - it means the client is already registered
+    if (response.action === 'BAD_REQUEST' && 
+        response.resultCode === 'A327605') {
+      logger.logInfo(
+        'Client already registered with this entity ID',
+        'AuthleteIntegrationService',
+        {
+          resultCode: response.resultCode,
+          resultMessage: response.resultMessage
+        }
+      );
+      
+      // Return a minimal response indicating the client is already registered
+      // We cannot return the actual client_id or client_secret as Authlete doesn't provide them
+      throw new FederationRegistrationError(
+        'client_already_registered',
+        'Client with this entity ID is already registered',
+        200, // Use 200 status to indicate this is not a real error
+        response
+      );
+    }
+    
     // Validate response action - accept both OK and CREATED
     if (response.action !== 'CREATED' && response.action !== 'OK') {
       // Check for specific error codes in BAD_REQUEST responses
