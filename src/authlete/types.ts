@@ -198,6 +198,10 @@ export interface AuthleteFederationRegistrationRequest {
   subject_type?: string;
   id_token_signed_response_alg?: string;
   token_endpoint_auth_method?: string;
+  // PKCE support
+  clientType?: 'public' | 'confidential';
+  pkceRequired?: boolean;
+  pkceCodeChallengeMethods?: string[];
   // Federation-specific parameters
   entityConfiguration?: string;  // JWT entity configuration
   trustChain?: string[];         // Array of entity statements (JWTs)

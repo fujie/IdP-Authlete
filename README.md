@@ -5,7 +5,9 @@ OpenID Federation 1.0に対応したOAuth 2.0 / OpenID Connect認可サーバー
 ## 主な機能
 
 - ✅ OAuth 2.0 Authorization Code Flow
-- ✅ **OpenID Federation 動的クライアント登録**
+- ✅ **PKCE (Proof Key for Code Exchange)** - S256方式による認可コード保護
+- ✅ **OpenID Federation 動的クライアント登録** - Public/PKCEクライアント対応
+- ✅ **マルチOP選択機能**（複数のOPから選択可能）
 - ✅ **Trust Chain検証**
 - ✅ **Entity Discovery**
 - ✅ **Request Object処理（JWT）**
@@ -22,12 +24,22 @@ OpenID Federation 1.0に対応したOAuth 2.0 / OpenID Connect認可サーバー
 
 ### クイックスタート
 - **[クイックスタートガイド](QUICKSTART.md)** - 5分で環境を起動
+- **[PKCE実装サマリー](PKCE_IMPLEMENTATION_SUMMARY.md)** - PKCE実装とセキュリティ強化の詳細
+- **[マルチOP環境クイックリファレンス](MULTI_OP_QUICK_REFERENCE.md)** - 複数OP起動の簡易ガイド
 - **[Federation実装ガイド](FEDERATION_README.md)** - 完全な実装ドキュメント
 
+### セットアップガイド
+- **[OP2セットアップガイド](OP2_SETUP.md)** - 2つ目のOPのセットアップ手順
+- **[OP Federationセットアップ](OP_FEDERATION_SETUP.md)** - OPのFederation設定
+
 ### 仕様書
-- [要件定義](.kiro/specs/federation-dynamic-registration/requirements.md)
-- [設計書](.kiro/specs/federation-dynamic-registration/design.md)
-- [タスクリスト](.kiro/specs/federation-dynamic-registration/tasks.md)
+- [Federation動的登録](.kiro/specs/federation-dynamic-registration/) - 要件定義、設計書、タスクリスト
+- [マルチOP選択機能](.kiro/specs/rp-multi-op-selection/) - 要件定義、設計書、タスクリスト
+- [OP Trust検証機能](.kiro/specs/rp-op-trust-validation/) - 要件定義、設計書、タスクリスト
+
+### その他
+- **[プロジェクトサマリー](PROJECT_SUMMARY.md)** - プロジェクト全体の概要
+- **[トラブルシューティング](TROUBLESHOOTING.md)** - よくある問題と解決方法
 
 ## Prerequisites
 
@@ -158,6 +170,30 @@ src/
 - Input validation and sanitization
 - Rate limiting protection
 - HTTPS enforcement in production
+- **PKCE (Proof Key for Code Exchange)** - S256方式による認可コード保護
+- **Trust Anchor鍵永続化** - 秘密鍵の安全な保存と再利用
+- **秘密情報の保護** - `.gitignore`による秘密情報の除外
+
+### PKCE実装
+
+RPクライアントは自動的にPKCE対応のPublicクライアントとして登録されます：
+
+- **Client Type**: `public`
+- **Token Endpoint Auth Method**: `none`
+- **PKCE Required**: `true`
+- **PKCE Code Challenge Method**: `S256` (SHA-256)
+
+詳細は[PKCE実装サマリー](PKCE_IMPLEMENTATION_SUMMARY.md)を参照してください。
+
+### 秘密情報の保護
+
+以下のファイルは`.gitignore`に追加されており、Gitにコミットされません：
+
+- `.env`, `.env.op2` - Authlete認証情報
+- `.trust-anchor-keys.json` - Trust Anchor秘密鍵
+- `.client-credentials.json`, `.op-credentials.json` - クライアント認証情報
+
+**重要**: これらのファイルは本番環境で適切に保護してください。
 
 ## License
 

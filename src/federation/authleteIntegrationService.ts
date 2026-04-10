@@ -3,8 +3,7 @@ import {
   AuthleteFederationRegistrationRequest, 
   AuthleteFederationRegistrationResponse,
   AuthleteFederationConfigurationRequest,
-  AuthleteFederationConfigurationResponse,
-  AuthleteDynamicRegistrationRequest
+  AuthleteFederationConfigurationResponse
 } from '../authlete/types';
 import { AuthleteIntegrationService } from './interfaces';
 import { logger } from '../utils/logger';
@@ -90,81 +89,26 @@ export class AuthleteIntegrationServiceImpl implements AuthleteIntegrationServic
     );
 
     try {
-      // Try Authlete's federation registration API first
-      try {
-        const response = await this.authleteClient.federationRegistration(request);
-        
-        // Process and validate the response
-        const processedResponse = this.processRegistrationResponse(response);
+      // Call Authlete's federation registration API
+      const response = await this.authleteClient.federationRegistration(request);
+      
+      // Process and validate the response
+      const processedResponse = this.processRegistrationResponse(response);
 
-        // Log successful registration
-        logger.logInfo(
-          'Federated client registered successfully with Authlete federation API',
-          'AuthleteIntegrationService',
-          {
-            action: response.action,
-            clientId: processedResponse.clientId,
-            hasClientSecret: !!processedResponse.clientSecret,
-            hasEntityStatement: !!processedResponse.entityStatement,
-            trustAnchorId: processedResponse.trustAnchorId
-          }
-        );
-
-        return response;
-      } catch (federationApiError) {
-        // If federation API fails with 400/404, fall back to standard client registration
-        if (federationApiError instanceof AuthleteApiError && 
-            (federationApiError.statusCode === 400 || federationApiError.statusCode === 404)) {
-          
-          logger.logWarn(
-            'Federation registration API not available, falling back to standard client registration',
-            'AuthleteIntegrationService',
-            {
-              error: federationApiError.message,
-              statusCode: federationApiError.statusCode
-            }
-          );
-
-          // Use standard client registration endpoint
-          const standardRequest = {
-            redirect_uris: request.redirect_uris!,
-            client_name: request.client_name,
-            client_uri: request.client_uri,
-            contacts: request.contacts,
-            response_types: request.response_types,
-            grant_types: request.grant_types,
-            application_type: request.application_type,
-            subject_type: request.subject_type,
-            id_token_signed_response_alg: request.id_token_signed_response_alg,
-            token_endpoint_auth_method: request.token_endpoint_auth_method
-          } as AuthleteDynamicRegistrationRequest;
-
-          const standardResponse = await this.authleteClient.dynamicClientRegistration(standardRequest);
-          
-          // Convert standard response to federation response format
-          const federationResponse: AuthleteFederationRegistrationResponse = {
-            ...standardResponse,
-            // Add federation-specific fields
-            trustAnchorId: request.trustAnchorId,
-            entityConfiguration: request.entityConfiguration
-          };
-
-          logger.logInfo(
-            'Federated client registered successfully with standard client registration API',
-            'AuthleteIntegrationService',
-            {
-              action: federationResponse.action,
-              clientId: federationResponse.client_id,
-              hasClientSecret: !!federationResponse.client_secret
-            }
-          );
-
-          return federationResponse;
+      // Log successful registration
+      logger.logInfo(
+        'Federated client registered successfully with Authlete federation API',
+        'AuthleteIntegrationService',
+        {
+          action: response.action,
+          clientId: processedResponse.clientId,
+          hasClientSecret: !!processedResponse.clientSecret,
+          hasEntityStatement: !!processedResponse.entityStatement,
+          trustAnchorId: processedResponse.trustAnchorId
         }
-        
-        // Re-throw if it's not a 400/404 error
-        throw federationApiError;
-      }
+      );
+
+      return response;
     } catch (error) {
       // Handle and transform errors
       const federationError = this.handleRegistrationError(error);
@@ -224,9 +168,55 @@ export class AuthleteIntegrationServiceImpl implements AuthleteIntegrationServic
     
     // Validate response action - accept both OK and CREATED
     if (response.action !== 'CREATED' && response.action !== 'OK') {
+      // Check for specific error codes in BAD_REQUEST responses
+      if (response.action === 'BAD_REQUEST') {
+        const resultCode = response.resultCode;
+        const resultMessage = response.resultMessage || '';
+        
+        // A327605: Entity ID already in use
+        if (resultCode === 'A327605' || resultMessage.includes('A327605')) {
+          throw new FederationRegistrationError(
+            'entity_id_conflict',
+            'A client with this entity ID already exists in Authlete. Please delete the existing client from the Authlete dashboard before registering again.',
+            400,
+            response
+          );
+        }
+        
+        // A206201: Service does not support dynamic client registration
+        if (resultCode === 'A206201' || resultMessage.includes('A206201')) {
+          throw new FederationRegistrationError(
+            'registration_not_supported',
+            'Dynamic client registration is not enabled for this service. Please enable it in the Authlete dashboard.',
+            400,
+            response
+          );
+        }
+        
+        // A203302: Client metadata was empty
+        if (resultCode === 'A203302' || resultMessage.includes('A203302')) {
+          throw new FederationRegistrationError(
+            'invalid_client_metadata',
+            'The client metadata in the request is invalid or incomplete.',
+            400,
+            response
+          );
+        }
+        
+        // A320312: Trust anchor not registered
+        if (resultCode === 'A320312' || resultMessage.includes('A320312')) {
+          throw new FederationRegistrationError(
+            'trust_anchor_not_registered',
+            'The trust anchor is not registered in this service. Please register the trust anchor in the Authlete dashboard.',
+            400,
+            response
+          );
+        }
+      }
+      
       throw new FederationRegistrationError(
         'registration_failed',
-        `Registration failed with action: ${response.action}`,
+        `Registration failed with action: ${response.action} - ${response.resultMessage || 'Unknown error'}`,
         this.getStatusCodeForAction(response.action),
         response
       );
@@ -369,8 +359,19 @@ export class AuthleteIntegrationServiceImpl implements AuthleteIntegrationServic
         const resultMessage = authleteResponse?.resultMessage || '';
         
         // A327605: Entity ID already in use (client already registered)
+        // This should NOT be treated as success - it indicates a real conflict
         if (resultCode === 'A327605' || resultMessage.includes('A327605')) {
-          return 'client_already_registered';
+          return 'entity_id_conflict';
+        }
+        
+        // A206201: Service does not support dynamic client registration
+        if (resultCode === 'A206201' || resultMessage.includes('A206201')) {
+          return 'registration_not_supported';
+        }
+        
+        // A203302: Client metadata was empty
+        if (resultCode === 'A203302' || resultMessage.includes('A203302')) {
+          return 'invalid_client_metadata';
         }
         
         if (resultMessage.includes('trust chain')) {
@@ -418,13 +419,15 @@ export class AuthleteIntegrationServiceImpl implements AuthleteIntegrationServic
       'temporarily_unavailable': 'The registration service is temporarily unavailable due to rate limiting',
       'server_error': 'An internal server error occurred during registration',
       'registration_failed': 'Client registration failed',
-      'client_already_registered': 'Client with this entity ID is already registered'
+      'entity_id_conflict': 'A client with this entity ID already exists in Authlete. Please delete the existing client from the Authlete dashboard (Service > Clients) before registering again.',
+      'registration_not_supported': 'Dynamic client registration is not enabled for this service. Please enable it in the Authlete dashboard.',
+      'trust_anchor_not_registered': 'The trust anchor is not registered in this service. Please register the trust anchor\'s JWKS in the Authlete dashboard (Service > OpenID Federation > Trust Anchors).'
     };
 
     const baseDescription = descriptions[errorCode] || 'An error occurred during registration';
     
-    // For client_already_registered, return a success-like message
-    if (errorCode === 'client_already_registered') {
+    // For entity_id_conflict, return only the base description (it's already detailed)
+    if (errorCode === 'entity_id_conflict' || errorCode === 'trust_anchor_not_registered') {
       return baseDescription;
     }
     

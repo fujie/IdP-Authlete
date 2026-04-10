@@ -23,7 +23,7 @@ export const FEDERATION_RESPONSE_TYPES = {
  */
 export const FEDERATION_CONSTANTS = {
   // Well-known endpoints
-  ENTITY_CONFIGURATION_PATH: '/.well-known/openid_federation',
+  ENTITY_CONFIGURATION_PATH: '/.well-known/openid-federation',
   
   // JWT algorithms
   SUPPORTED_SIGNING_ALGORITHMS: ['RS256', 'RS384', 'RS512', 'ES256', 'ES384', 'ES512'],

@@ -14,6 +14,7 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.op2
 
 # Logs
 logs
@@ -44,7 +45,26 @@ Thumbs.db
 
 # Client credentials (persisted registration data)
 .client-credentials.json
+.op-credentials.json
+test-client-federation-valid/.client-credentials.json
+test-client-federation-valid/.op-credentials.json
+test-client-federation-invalid/.client-credentials.json
+
+# Trust Anchor keys (contains private keys)
+.trust-anchor-keys.json
+trust-anchor/.trust-anchor-keys.json
 
 # Temporary test files
 *_cookies.txt
 cookies.txt
+
+# Authlete credentials and sensitive configuration
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.op2
+test-client-federation-valid/.env
+test-client-federation-invalid/.env
+trust-anchor/.env

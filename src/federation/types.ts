@@ -219,7 +219,7 @@ export interface EntityStatement {
     exp: number;
     jwks?: JWKSet;
     metadata?: EntityMetadata;
-    authorityHints?: string[];
+    authority_hints?: string[];
   };
 }
 
@@ -233,6 +233,7 @@ export interface ValidationResult {
   isValid: boolean;
   trustAnchor?: string;
   clientMetadata?: ClientMetadata;
+  trustChain?: EntityStatement[];  // 完成されたTrust Chain
   errors?: ValidationError[];
 }
 

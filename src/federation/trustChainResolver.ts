@@ -222,7 +222,28 @@ export class TrustChainResolver implements TrustChainValidator {
         }
 
         // Use first authority hint (in real implementation, might try multiple)
-        currentEntityId = authorityHints[0];
+        const authorityEntityId = authorityHints[0];
+        
+        // If the authority is a trust anchor, fetch the entity statement about the current entity
+        if (this.trustAnchors.has(authorityEntityId)) {
+          // Fetch entity statement from trust anchor about the subordinate entity
+          const entityStatement = await this.fetchEntityStatementFromAuthority(authorityEntityId, currentEntityId);
+          if (!entityStatement) {
+            throw new Error(`Trust anchor ${authorityEntityId} does not have an entity statement for ${currentEntityId}`);
+          }
+          
+          // Add the entity statement to the chain
+          chain.push({
+            jwt: entityStatement.jwt,
+            payload: entityStatement.payload
+          });
+          
+          // Move to trust anchor
+          currentEntityId = authorityEntityId;
+        } else {
+          // Move to intermediate authority
+          currentEntityId = authorityEntityId;
+        }
       }
 
       // Add trust anchor if we reached one
@@ -366,6 +387,124 @@ export class TrustChainResolver implements TrustChainValidator {
   }
 
   /**
+   * Fetch entity statement from authority about a subordinate entity
+   * Implements Requirement 2.1
+   */
+  private async fetchEntityStatementFromAuthority(authorityId: string, subordinateId: string): Promise<{ jwt: string; payload: EntityConfiguration } | null> {
+    try {
+      // Build federation fetch URL
+      const fetchUrl = `${authorityId}/federation/fetch?sub=${encodeURIComponent(subordinateId)}`;
+      
+      logger.logInfo(
+        'Fetching entity statement from authority',
+        'TrustChainResolver',
+        { authorityId, subordinateId, fetchUrl }
+      );
+
+      const response = await this.httpClient(fetchUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': FEDERATION_CONTENT_TYPES.JWT,
+          'User-Agent': 'OpenID-Federation-Client/1.0'
+        },
+        // Add timeout to prevent hanging requests
+        signal: AbortSignal.timeout(10000) // 10 second timeout
+      });
+
+      if (!response.ok) {
+        logger.logWarn(
+          'Failed to fetch entity statement from authority',
+          'TrustChainResolver',
+          { 
+            authorityId, 
+            subordinateId, 
+            fetchUrl, 
+            status: response.status, 
+            statusText: response.statusText 
+          }
+        );
+        return null;
+      }
+
+      const jwt = await response.text();
+      
+      // Decode JWT to get payload (signature verification happens later)
+      const decoded = JWTUtils.decodeJWT(jwt);
+      
+      // Basic validation of entity statement structure
+      if (!decoded.payload.iss || !decoded.payload.sub) {
+        logger.logWarn(
+          'Invalid entity statement structure',
+          'TrustChainResolver',
+          { authorityId, subordinateId, fetchUrl }
+        );
+        return null;
+      }
+
+      // Verify issuer and subject
+      if (decoded.payload.iss !== authorityId) {
+        logger.logWarn(
+          'Entity statement issuer mismatch',
+          'TrustChainResolver',
+          { 
+            authorityId, 
+            subordinateId, 
+            expectedIss: authorityId,
+            actualIss: decoded.payload.iss 
+          }
+        );
+        return null;
+      }
+
+      if (decoded.payload.sub !== subordinateId) {
+        logger.logWarn(
+          'Entity statement subject mismatch',
+          'TrustChainResolver',
+          { 
+            authorityId, 
+            subordinateId, 
+            expectedSub: subordinateId,
+            actualSub: decoded.payload.sub 
+          }
+        );
+        return null;
+      }
+
+      logger.logInfo(
+        'Entity statement fetched successfully from authority',
+        'TrustChainResolver',
+        { 
+          authorityId, 
+          subordinateId,
+          iss: decoded.payload.iss,
+          sub: decoded.payload.sub,
+          exp: decoded.payload.exp,
+          hasJwks: !!decoded.payload.jwks
+        }
+      );
+
+      return {
+        jwt,
+        payload: decoded.payload as EntityConfiguration
+      };
+
+    } catch (error) {
+      logger.logError({
+        message: 'Error fetching entity statement from authority',
+        component: 'TrustChainResolver',
+        error: {
+          name: error instanceof Error ? error.name : 'UnknownError',
+          message: error instanceof Error ? error.message : String(error),
+          ...(error instanceof Error && error.stack && { stack: error.stack })
+        },
+        context: { authorityId, subordinateId }
+      });
+
+      return null;
+    }
+  }
+
+  /**
    * Validate individual entity statement
    * Basic validation - signature verification happens in separate component
    */
@@ -418,7 +557,7 @@ export class TrustChainResolver implements TrustChainValidator {
     }
 
     // Trust anchors should not have authority hints
-    if (isTrustAnchor && payload.authorityHints && payload.authorityHints.length > 0) {
+    if (isTrustAnchor && payload.authority_hints && payload.authority_hints.length > 0) {
       errors.push(ValidationUtils.createValidationError(
         FEDERATION_CONSTANTS.ERRORS.INVALID_TRUST_ANCHOR,
         'Trust anchor should not have authority hints'
@@ -426,7 +565,7 @@ export class TrustChainResolver implements TrustChainValidator {
     }
 
     // Non-trust anchors should have authority hints (unless they are leaf entities)
-    if (!isTrustAnchor && (!payload.authorityHints || payload.authorityHints.length === 0)) {
+    if (!isTrustAnchor && (!payload.authority_hints || payload.authority_hints.length === 0)) {
       // This might be a leaf entity, which is acceptable
       logger.logInfo(
         'Entity statement has no authority hints (might be leaf entity)',
@@ -532,6 +671,7 @@ export interface ValidationResult {
   isValid: boolean;
   trustAnchor?: string;
   clientMetadata?: ClientMetadata;
+  trustChain?: EntityStatement[];  // 完成されたTrust Chain
   errors?: ValidationError[];
 }
 

@@ -297,6 +297,20 @@ A: Authorization Serverを再起動してください。設定の変更は自動
 3. `.env`ファイルの設定を再確認
 4. cloudflaredトンネルが正しく起動しているか確認
 
+## RP-Side OP Trust Chain Validation Troubleshooting
+
+For detailed troubleshooting information about RP-side OP trust chain validation, including error codes, common issues, and resolution steps, see:
+
+**[RP OP Validation Troubleshooting Guide](test-client-federation-valid/README.md#error-codes-and-troubleshooting)**
+
+This guide covers:
+- All error codes (`op_unreachable`, `invalid_signature`, `missing_authority_hints`, `trust_chain_invalid`, `timeout`, etc.)
+- Detailed troubleshooting steps for each error
+- Common issues and solutions
+- Debugging tips and tools
+- Cache management
+- Configuration validation
+
 ---
 
-**最終更新**: 2026-01-31
+**最終更新**: 2026-02-03

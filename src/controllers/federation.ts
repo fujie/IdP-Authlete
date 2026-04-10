@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { AuthleteClient } from '../authlete/client';
 import { logger } from '../utils/logger';
 import { createFederationRegistrationHandler } from '../federation/federationRegistrationEndpoint';
+import { generateOPEntityConfiguration } from '../federation/opEntityConfiguration';
 import { config } from '../config';
 
 export interface FederationController {
@@ -58,38 +59,90 @@ export class FederationControllerImpl implements FederationController {
         }
       );
 
-      // Call Authlete's federation configuration API to get the signed entity configuration JWT
-      const response = await this.authleteClient.federationConfiguration({});
+      // Try to call Authlete's federation configuration API first
+      try {
+        const response = await this.authleteClient.federationConfiguration({});
 
-      if (response.action === 'OK' && response.entityConfiguration) {
-        // Return the properly signed entity configuration JWT from Authlete
-        res.setHeader('Content-Type', 'application/entity-statement+jwt');
-        res.send(response.entityConfiguration);
+        if (response.action === 'OK' && response.entityConfiguration) {
+          // Return the properly signed entity configuration JWT from Authlete
+          res.setHeader('Content-Type', 'application/entity-statement+jwt');
+          res.send(response.entityConfiguration);
 
-        logger.logInfo(
-          'Entity configuration response sent from Authlete',
+          logger.logInfo(
+            'Entity configuration response sent from Authlete',
+            'FederationController',
+            {
+              action: response.action,
+              hasEntityConfiguration: !!response.entityConfiguration
+            }
+          );
+          return;
+        }
+      } catch (authleteError) {
+        logger.logWarn(
+          'Authlete federation configuration API unavailable, using local generation',
           'FederationController',
           {
-            action: response.action,
-            hasEntityConfiguration: !!response.entityConfiguration
+            error: authleteError instanceof Error ? authleteError.message : String(authleteError)
           }
         );
-      } else {
-        // Handle error response from Authlete
+      }
+
+      // Fallback: Generate entity configuration locally
+      const opEntityId = process.env.OP_ENTITY_ID;
+      const trustAnchors = config.federation?.trustAnchors || [];
+      
+      if (!opEntityId) {
         logger.logError({
-          message: 'Authlete federation configuration API returned error',
+          message: 'OP_ENTITY_ID not configured',
           component: 'FederationController',
           error: {
-            name: 'AuthleteError',
-            message: `Action: ${response.action}, Code: ${response.resultCode}, Message: ${response.resultMessage || 'Unknown error'}`
+            name: 'ConfigurationError',
+            message: 'OP_ENTITY_ID environment variable is required for entity configuration'
           }
         });
-
+        
         res.status(500).json({
           error: 'server_error',
-          error_description: 'Entity configuration unavailable'
+          error_description: 'OP entity ID not configured'
         });
+        return;
       }
+      
+      if (trustAnchors.length === 0) {
+        logger.logError({
+          message: 'No trust anchors configured',
+          component: 'FederationController',
+          error: {
+            name: 'ConfigurationError',
+            message: 'FEDERATION_TRUST_ANCHORS environment variable is required'
+          }
+        });
+        
+        res.status(500).json({
+          error: 'server_error',
+          error_description: 'Trust anchors not configured'
+        });
+        return;
+      }
+      
+      // Generate entity configuration JWT
+      const entityConfiguration = await generateOPEntityConfiguration(
+        opEntityId,
+        trustAnchors[0] // Use first trust anchor
+      );
+      
+      res.setHeader('Content-Type', 'application/entity-statement+jwt');
+      res.send(entityConfiguration);
+      
+      logger.logInfo(
+        'Entity configuration generated locally and sent',
+        'FederationController',
+        {
+          entityId: opEntityId,
+          trustAnchor: trustAnchors[0]
+        }
+      );
 
     } catch (error) {
       logger.logError({

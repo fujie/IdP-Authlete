@@ -323,13 +323,14 @@ describe('IntrospectionController', () => {
     });
 
     it('should handle fallback response when responseContent is missing', async () => {
+      const futureTimestamp = Date.now() + 3600000; // 1 hour from now
       const mockIntrospectionResponse: IntrospectionResponse = {
         action: 'OK',
         active: true,
         clientId: 123,
         scopes: ['read', 'write'],
         subject: 'user123',
-        expiresAt: 1234567890000
+        expiresAt: futureTimestamp
       };
 
       vi.mocked(mockAuthleteClient.introspection).mockResolvedValue(mockIntrospectionResponse);
@@ -349,7 +350,7 @@ describe('IntrospectionController', () => {
         client_id: 123,
         scope: 'read write',
         sub: 'user123',
-        exp: 1234567890
+        exp: Math.floor(futureTimestamp / 1000)
       });
     });
   });

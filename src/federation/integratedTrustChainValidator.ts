@@ -74,29 +74,148 @@ export class IntegratedTrustChainValidator implements TrustChainValidator {
         };
       }
 
-      // Step 1: Resolve trust chain if not provided
+      // Step 1: Resolve trust chain if not provided or incomplete
       let resolvedChain: EntityStatement[];
-      if (trustChain) {
+      if (trustChain && trustChain.length > 0) {
         resolvedChain = trustChain;
-        
-        // Check for empty provided trust chain
-        if (resolvedChain.length === 0) {
-          return {
-            isValid: false,
-            errors: [
-              ValidationUtils.createValidationError(
-                FEDERATION_CONSTANTS.ERRORS.ENTITY_NOT_FOUND,
-                `Empty trust chain provided for entity: ${entityId}`
-              )
-            ]
-          };
-        }
         
         logger.logInfo(
           'Using provided trust chain',
           'IntegratedTrustChainValidator',
           { entityId, chainLength: resolvedChain.length }
         );
+        
+        // Check if the trust chain is complete (ends with a trust anchor)
+        const lastEntity = resolvedChain[resolvedChain.length - 1];
+        const isTrustAnchor = this.trustAnchorValidator.isTrustedAnchorSync(lastEntity.payload.iss);
+        
+        if (!isTrustAnchor) {
+          // Trust chain is incomplete, need to resolve the rest
+          logger.logInfo(
+            'Provided trust chain is incomplete, resolving remaining chain',
+            'IntegratedTrustChainValidator',
+            { 
+              entityId, 
+              lastEntity: lastEntity.payload.iss,
+              authorityHints: lastEntity.payload.authority_hints 
+            }
+          );
+          
+          // Get authority hints from the last entity
+          const authorityHints = lastEntity.payload.authority_hints || [];
+          if (authorityHints.length > 0) {
+            const trustAnchorId = authorityHints[0];
+            const leafEntityId = resolvedChain[0].payload.sub;
+            
+            try {
+              // Step 1: Fetch the Trust Anchor's Entity Statement about the leaf entity
+              const fetchUrl = `${trustAnchorId}/federation/fetch?sub=${encodeURIComponent(leafEntityId)}`;
+              
+              logger.logInfo(
+                'Fetching Trust Anchor Entity Statement',
+                'IntegratedTrustChainValidator',
+                { trustAnchorId, leafEntityId, fetchUrl }
+              );
+              
+              const fetchResponse = await fetch(fetchUrl, {
+                method: 'GET',
+                headers: {
+                  'Accept': 'application/entity-statement+jwt',
+                  'User-Agent': 'OpenID-Federation-Client/1.0'
+                },
+                signal: AbortSignal.timeout(10000)
+              });
+              
+              if (!fetchResponse.ok) {
+                logger.logWarn(
+                  'Failed to fetch Trust Anchor Entity Statement',
+                  'IntegratedTrustChainValidator',
+                  { 
+                    trustAnchorId, 
+                    leafEntityId, 
+                    status: fetchResponse.status 
+                  }
+                );
+              } else {
+                const taStatementJwt = await fetchResponse.text();
+                const taStatementDecoded = ValidationUtils.decodeJWT(taStatementJwt);
+                
+                // Add the Trust Anchor's Entity Statement to the chain
+                resolvedChain.push({
+                  jwt: taStatementJwt,
+                  payload: taStatementDecoded.payload
+                });
+                
+                logger.logInfo(
+                  'Trust Anchor Entity Statement added to chain',
+                  'IntegratedTrustChainValidator',
+                  { 
+                    trustAnchorId, 
+                    leafEntityId,
+                    chainLength: resolvedChain.length
+                  }
+                );
+                
+                // Step 2: Fetch the Trust Anchor's Entity Configuration for signature verification
+                const taConfigUrl = `${trustAnchorId}/.well-known/openid-federation`;
+                
+                logger.logInfo(
+                  'Fetching Trust Anchor Entity Configuration',
+                  'IntegratedTrustChainValidator',
+                  { trustAnchorId, taConfigUrl }
+                );
+                
+                const taConfigResponse = await fetch(taConfigUrl, {
+                  method: 'GET',
+                  headers: {
+                    'Accept': 'application/entity-statement+jwt',
+                    'User-Agent': 'OpenID-Federation-Client/1.0'
+                  },
+                  signal: AbortSignal.timeout(10000)
+                });
+                
+                if (!taConfigResponse.ok) {
+                  logger.logWarn(
+                    'Failed to fetch Trust Anchor Entity Configuration',
+                    'IntegratedTrustChainValidator',
+                    { 
+                      trustAnchorId, 
+                      status: taConfigResponse.status 
+                    }
+                  );
+                } else {
+                  const taConfigJwt = await taConfigResponse.text();
+                  const taConfigDecoded = ValidationUtils.decodeJWT(taConfigJwt);
+                  
+                  // Add the Trust Anchor's Entity Configuration to the chain
+                  resolvedChain.push({
+                    jwt: taConfigJwt,
+                    payload: taConfigDecoded.payload
+                  });
+                  
+                  logger.logInfo(
+                    'Trust Anchor Entity Configuration added to chain',
+                    'IntegratedTrustChainValidator',
+                    { 
+                      trustAnchorId,
+                      totalChainLength: resolvedChain.length
+                    }
+                  );
+                }
+              }
+            } catch (error) {
+              logger.logError({
+                message: 'Error completing trust chain',
+                component: 'IntegratedTrustChainValidator',
+                error: {
+                  name: error instanceof Error ? error.name : 'UnknownError',
+                  message: error instanceof Error ? error.message : String(error)
+                },
+                context: { trustAnchorId: authorityHints[0], leafEntityId }
+              });
+            }
+          }
+        }
       } else {
         logger.logInfo(
           'Resolving trust chain from entity configurations',
@@ -210,7 +329,8 @@ export class IntegratedTrustChainValidator implements TrustChainValidator {
       return {
         isValid: true,
         trustAnchor: trustAnchorValidationResult.trustAnchorId!,
-        clientMetadata
+        clientMetadata,
+        trustChain: resolvedChain  // 完成されたTrust Chainを返す
       };
 
     } catch (error) {
